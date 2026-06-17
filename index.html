@@ -34,6 +34,7 @@ body{background:#fdf6f0}
 .sold-btn{background:#27ae60;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit}
 .edit-btn{background:#f0e6e8;color:#6b2737;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit}
 .qr-btn{background:#2980b9;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+.return-btn{background:#e67e22;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit}
 .empty{text-align:center;color:#aaa;padding:30px;font-size:13px}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:50;display:none;align-items:flex-end;justify-content:center}
 .overlay.show{display:flex}
@@ -147,6 +148,7 @@ function itemCard(item,compact){
     h+='<button class="edit-btn" onclick="openEditItem('+item.id+')">編集</button>';
     h+='<button class="qr-btn" onclick="showQR('+item.id+')">QR/値札</button>';
     if(!sold)h+='<button class="sold-btn" onclick="openSell('+item.id+')">販売する</button>';
+    if(sold)h+='<button class="return-btn" onclick="returnToStock('+item.id+')">在庫に戻す</button>';
     h+='</div>';
   }
   h+='<div style="clear:both"></div></div>';
@@ -168,6 +170,12 @@ function openEditItem(id){const item=items.find(i=>i.id===id);if(!item)return;do
 async function saveItem(id){const name=document.getElementById('f-name').value;const origin=document.getElementById('f-origin').value;const buy=+document.getElementById('f-buy').value;const sell=+document.getElementById('f-sell').value;if(!name||!origin||!buy||!sell)return alert('必須項目を入力してください');const code=document.getElementById('f-code').value;const type=document.getElementById('f-type').value;const note=document.getElementById('f-note').value;const listing_site=document.getElementById('f-site')?document.getElementById('f-site').value:'';const listing_url=document.getElementById('f-url')?document.getElementById('f-url').value:'';let photo_url=id?(items.find(i=>i.id===id)||{}).photo_url:null;const photoFile=document.getElementById('f-photo').files[0];if(photoFile){const url=await uploadPhoto(photoFile);if(url)photo_url=url}const row={code,name,origin,type,buy_price:buy,sell_price:sell,note,photo_url,listing_site,listing_url};if(id)await sbFetch('items?id=eq.'+id,{method:'PATCH',body:JSON.stringify(row)});else await sbFetch('items',{method:'POST',body:JSON.stringify(row)});await load();closeModal()}
 function openSell(id){const item=items.find(i=>i.id===id);if(!item)return;document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button><div class="modal-title">販売登録</div><div class="card" style="margin-bottom:14px"><div class="item-name">'+esc(item.name)+'</div><div class="item-sub">'+esc(item.code)+'</div></div><label class="field-label">販売価格(円)</label><input class="field-input" id="f-sprice" type="number" value="'+item.sell_price+'"><label class="field-label">販売日</label><input class="field-input" id="f-sdate" type="date" value="'+today()+'"><label class="field-label">メモ</label><input class="field-input" id="f-snote" placeholder="任意"><button class="save-btn" style="background:#27ae60" onclick="saveSell('+id+')">販売確定</button></div>';document.getElementById('modal').classList.add('show')}
 async function saveSell(itemId){const price=+document.getElementById('f-sprice').value;const date=document.getElementById('f-sdate').value;const note=document.getElementById('f-snote').value;if(!price)return alert('販売価格を入力してください');await sbFetch('sales',{method:'POST',body:JSON.stringify({item_id:itemId,sell_price:price,sold_at:date,note})});await sbFetch('items?id=eq.'+itemId,{method:'PATCH',body:JSON.stringify({status:'sold'})});await load();closeModal()}
+function returnToStock(id){
+  const item=items.find(i=>i.id===id);
+  if(!item)return;
+  if(!confirm(item.name+'を在庫に戻しますか？'))return;
+  sbFetch('items?id=eq.'+id,{method:'PATCH',body:JSON.stringify({status:'in_stock'})}).then(function(){load()});
+}
 function closeModal(){document.getElementById('modal').classList.remove('show');document.getElementById('modal').innerHTML=''}
 const urlParams=new URLSearchParams(location.search);
 const scannedCode=urlParams.get('code');
