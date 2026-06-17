@@ -113,10 +113,29 @@ function renderDashboard(){
   const profit=totalSell-totalCost;
   let h='<h2 class="section-title">サマリー</h2><div class="card-grid">'+kpi('在庫数',inStock.length+'点','#c0392b')+kpi('売済数',soldItems.length+'点','#27ae60')+kpi('売上合計',fmt(totalSell),'#2980b9')+kpi('利益合計',fmt(profit),profit>=0?'#8e44ad':'#e74c3c')+'</div>';
   h+='<h2 class="section-title">最近登録したこけし</h2>';
+  h+='<div style="display:flex;gap:8px;margin-bottom:12px"><button class="add-btn" style="background:#27ae60;flex:1" onclick="exportCSV(\'items\')">&#128229; 在庫CSV</button><button class="add-btn" style="background:#2980b9;flex:1" onclick="exportCSV(\'sales\')">&#128229; 販売記録CSV</button></div>';
   items.slice(0,5).forEach(i=>{h+=itemCard(i,true)});
   h+='<div id="graph-area"></div>';
   document.getElementById('tab-dashboard').innerHTML=h;
   setTimeout(function(){renderGraph()},100);
+}
+function exportCSV(type){
+  let csv,filename;
+  if(type==='items'){
+    csv='管理コード,名前,産地,種類,仕入値,売値,ステータス,出品サイト,出品URL,メモ,登録日\n';
+    items.forEach(function(i){csv+=[i.code,i.name,i.origin,i.type,i.buy_price,i.sell_price,i.status==='in_stock'?'在庫中':'売済み',i.listing_site||'',i.listing_url||'',i.note||'',(i.created_at||'').slice(0,10)].map(function(v){return '"'+String(v||'').replace(/"/g,'""')+'"'}).join(',')+'\n'});
+    filename='kokeshi-inventory-'+today()+'.csv';
+  }else{
+    csv='管理コード,こけし名,販売価格,仕入値,利益,販売日,メモ\n';
+    sales.forEach(function(s){const item=items.find(function(i){return i.id===s.item_id})||{};const profit=(s.sell_price||0)-(item.buy_price||0);csv+=[item.code||'',item.name||'不明',s.sell_price,item.buy_price||0,profit,s.sold_at||'',s.note||''].map(function(v){return '"'+String(v||'').replace(/"/g,'""')+'"'}).join(',')+'\n'});
+    filename='kokeshi-sales-'+today()+'.csv';
+  }
+  const bom='\uFEFF';
+  const blob=new Blob([bom+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=filename;a.click();
+  URL.revokeObjectURL(url);
 }
 function renderGraph(){
   const monthlyData={};
@@ -170,12 +189,7 @@ function openEditItem(id){const item=items.find(i=>i.id===id);if(!item)return;do
 async function saveItem(id){const name=document.getElementById('f-name').value;const origin=document.getElementById('f-origin').value;const buy=+document.getElementById('f-buy').value;const sell=+document.getElementById('f-sell').value;if(!name||!origin||!buy||!sell)return alert('必須項目を入力してください');const code=document.getElementById('f-code').value;const type=document.getElementById('f-type').value;const note=document.getElementById('f-note').value;const listing_site=document.getElementById('f-site')?document.getElementById('f-site').value:'';const listing_url=document.getElementById('f-url')?document.getElementById('f-url').value:'';let photo_url=id?(items.find(i=>i.id===id)||{}).photo_url:null;const photoFile=document.getElementById('f-photo').files[0];if(photoFile){const url=await uploadPhoto(photoFile);if(url)photo_url=url}const row={code,name,origin,type,buy_price:buy,sell_price:sell,note,photo_url,listing_site,listing_url};if(id)await sbFetch('items?id=eq.'+id,{method:'PATCH',body:JSON.stringify(row)});else await sbFetch('items',{method:'POST',body:JSON.stringify(row)});await load();closeModal()}
 function openSell(id){const item=items.find(i=>i.id===id);if(!item)return;document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button><div class="modal-title">販売登録</div><div class="card" style="margin-bottom:14px"><div class="item-name">'+esc(item.name)+'</div><div class="item-sub">'+esc(item.code)+'</div></div><label class="field-label">販売価格(円)</label><input class="field-input" id="f-sprice" type="number" value="'+item.sell_price+'"><label class="field-label">販売日</label><input class="field-input" id="f-sdate" type="date" value="'+today()+'"><label class="field-label">メモ</label><input class="field-input" id="f-snote" placeholder="任意"><button class="save-btn" style="background:#27ae60" onclick="saveSell('+id+')">販売確定</button></div>';document.getElementById('modal').classList.add('show')}
 async function saveSell(itemId){const price=+document.getElementById('f-sprice').value;const date=document.getElementById('f-sdate').value;const note=document.getElementById('f-snote').value;if(!price)return alert('販売価格を入力してください');await sbFetch('sales',{method:'POST',body:JSON.stringify({item_id:itemId,sell_price:price,sold_at:date,note})});await sbFetch('items?id=eq.'+itemId,{method:'PATCH',body:JSON.stringify({status:'sold'})});await load();closeModal()}
-function returnToStock(id){
-  const item=items.find(i=>i.id===id);
-  if(!item)return;
-  if(!confirm(item.name+'を在庫に戻しますか？'))return;
-  sbFetch('items?id=eq.'+id,{method:'PATCH',body:JSON.stringify({status:'in_stock'})}).then(function(){load()});
-}
+function returnToStock(id){const item=items.find(i=>i.id===id);if(!item)return;if(!confirm(item.name+'を在庫に戻しますか？'))return;sbFetch('items?id=eq.'+id,{method:'PATCH',body:JSON.stringify({status:'in_stock'})}).then(function(){load()})}
 function closeModal(){document.getElementById('modal').classList.remove('show');document.getElementById('modal').innerHTML=''}
 const urlParams=new URLSearchParams(location.search);
 const scannedCode=urlParams.get('code');
