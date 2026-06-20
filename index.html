@@ -220,4 +220,26 @@ async function saveSell(itemId){
   const date=document.getElementById('f-sdate').value;
   const note=document.getElementById('f-snote').value;
   const fee_rate=+document.getElementById('f-fee-rate').value||0;
-  const
+  const ad_rate=+document.getElementById('f-ad-rate').value||0;
+  const shipping_fee=+document.getElementById('f-ship').value||0;
+  const customer_id=document.getElementById('f-customer')?+document.getElementById('f-customer').value||null:null;
+  const buyPrice=+document.getElementById('f-buy-hidden').value||0;
+  const fee=Math.round(price*fee_rate/100);
+  const adFee=Math.round(price*ad_rate/100);
+  const net_profit=price-buyPrice-fee-adFee-shipping_fee;
+  if(!price)return alert('販売価格を入力してください');
+  await sbFetch('sales',{method:'POST',body:JSON.stringify({item_id:itemId,sell_price:price,sold_at:date,note,customer_id,fee_rate,ad_rate,shipping_fee,net_profit})});
+  await sbFetch('items?id=eq.'+itemId,{method:'PATCH',body:JSON.stringify({status:'sold'})});
+  await load();closeModal();
+}
+function openAddCustomer(){document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button><div class="modal-title">顧客追加</div><label class="field-label">名前 *</label><input class="field-input" id="f-cname" placeholder="例: 山田太郎"><label class="field-label">連絡先</label><input class="field-input" id="f-ccontact" placeholder="電話番号・メール等"><label class="field-label">メモ</label><input class="field-input" id="f-cnote" placeholder="好みのこけし等"><button class="save-btn" onclick="saveCustomer(null)">登録する</button></div>';document.getElementById('modal').classList.add('show')}
+function openEditCustomer(id){const c=customers.find(function(c){return c.id===id});if(!c)return;document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button><div class="modal-title">顧客編集</div><label class="field-label">名前 *</label><input class="field-input" id="f-cname" value="'+esc(c.name)+'"><label class="field-label">連絡先</label><input class="field-input" id="f-ccontact" value="'+esc(c.contact||'')+'"><label class="field-label">メモ</label><input class="field-input" id="f-cnote" value="'+esc(c.note||'')+'"><button class="save-btn" onclick="saveCustomer('+id+')">保存する</button></div>';document.getElementById('modal').classList.add('show')}
+async function saveCustomer(id){const name=document.getElementById('f-cname').value;if(!name)return alert('名前を入力してください');const row={name,contact:document.getElementById('f-ccontact').value,note:document.getElementById('f-cnote').value};if(id)await sbFetch('customers?id=eq.'+id,{method:'PATCH',body:JSON.stringify(row)});else await sbFetch('customers',{method:'POST',body:JSON.stringify(row)});await load();closeModal()}
+function returnToStock(id){const item=items.find(i=>i.id===id);if(!item)return;if(!confirm(item.name+'を在庫に戻しますか？'))return;sbFetch('items?id=eq.'+id,{method:'PATCH',body:JSON.stringify({status:'in_stock'})}).then(function(){load()})}
+function closeModal(){document.getElementById('modal').classList.remove('show');document.getElementById('modal').innerHTML=''}
+const urlParams=new URLSearchParams(location.search);
+const scannedCode=urlParams.get('code');
+load().then(()=>{if(scannedCode){const item=items.find(i=>i.code===scannedCode);if(item){showTab('items',document.querySelectorAll('.nav-btn')[1]);searchWord=scannedCode;renderItems()}}});
+</script>
+</body>
+</html>
