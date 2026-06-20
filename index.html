@@ -122,8 +122,8 @@ function exportCSV(type){
     items.forEach(function(i){csv+=[i.code,i.name,i.origin,i.type,i.buy_price,i.sell_price,i.shipping_fee||0,i.status==='in_stock'?'在庫中':'売済み',i.note||'',(i.created_at||'').slice(0,10)].map(function(v){return'"'+String(v||'').replace(/"/g,'""')+'"'}).join(',')+'\n'});
     filename='kokeshi-inventory-'+today()+'.csv';
   }else{
-    csv='管理コード,こけし名,顧客名,販売価格,仕入値,手数料率,手数料,送料,純利益,販売日,メモ\n';
-    sales.forEach(function(s){const item=items.find(function(i){return i.id===s.item_id})||{};const customer=customers.find(function(c){return c.id===s.customer_id})||{};const fee=Math.round((s.sell_price||0)*(s.fee_rate||0)/100);csv+=[item.code||'',item.name||'不明',customer.name||'',s.sell_price,item.buy_price||0,s.fee_rate||0,fee,s.shipping_fee||0,s.net_profit!=null?s.net_profit:(s.sell_price||0)-(item.buy_price||0),s.sold_at||'',s.note||''].map(function(v){return'"'+String(v||'').replace(/"/g,'""')+'"'}).join(',')+'\n'});
+    csv='管理コード,こけし名,顧客名,販売価格,仕入値,手数料率,広告費率,手数料,広告費,送料,純利益,販売日,メモ\n';
+    sales.forEach(function(s){const item=items.find(function(i){return i.id===s.item_id})||{};const customer=customers.find(function(c){return c.id===s.customer_id})||{};const fee=Math.round((s.sell_price||0)*(s.fee_rate||0)/100);const adFee=Math.round((s.sell_price||0)*(s.ad_rate||0)/100);csv+=[item.code||'',item.name||'不明',customer.name||'',s.sell_price,item.buy_price||0,s.fee_rate||0,s.ad_rate||0,fee,adFee,s.shipping_fee||0,s.net_profit!=null?s.net_profit:(s.sell_price||0)-(item.buy_price||0),s.sold_at||'',s.note||''].map(function(v){return'"'+String(v||'').replace(/"/g,'""')+'"'}).join(',')+'\n'});
     filename='kokeshi-sales-'+today()+'.csv';
   }
   const encoded=encodeURIComponent('\uFEFF'+csv);
@@ -169,7 +169,7 @@ function itemCard(item,compact){
   return h;
 }
 function renderItems(){const filtered=items.filter(i=>{if(filterStatus==='in_stock'&&i.status!=='in_stock')return false;if(filterStatus==='sold'&&i.status!=='sold')return false;if(searchWord&&!((i.name||'').includes(searchWord)||(i.code||'').includes(searchWord)||(i.origin||'').includes(searchWord)))return false;return true});let h='<div class="row-between"><h2 class="section-title">在庫一覧</h2><button class="add-btn" onclick="openAddItem()">+ 登録</button></div>';h+='<input class="search-input" placeholder="名前・産地・コードで検索" oninput="searchWord=this.value;renderItems()" value="'+esc(searchWord)+'">';h+='<div class="filter-row"><button class="filter-btn'+(filterStatus==='all'?' active':'')+'" onclick="filterStatus=\'all\';renderItems()">すべて</button><button class="filter-btn'+(filterStatus==='in_stock'?' active':'')+'" onclick="filterStatus=\'in_stock\';renderItems()">在庫中</button><button class="filter-btn'+(filterStatus==='sold'?' active':'')+'" onclick="filterStatus=\'sold\';renderItems()">売済み</button></div>';if(!filtered.length)h+='<div class="empty">該当するこけしがありません</div>';filtered.forEach(item=>{h+=itemCard(item,false)});document.getElementById('tab-items').innerHTML=h}
-function renderSales(){let h='<h2 class="section-title">販売記録</h2>';if(!sales.length)h+='<div class="empty">販売記録がありません</div>';sales.forEach(s=>{const item=items.find(i=>i.id===s.item_id)||{};const customer=customers.find(c=>c.id===s.customer_id)||{};const net=s.net_profit!=null?s.net_profit:(s.sell_price||0)-(item.buy_price||0);h+='<div class="card"><div class="row-between"><span class="code-badge">'+esc(item.code||'-')+'</span><span class="item-sub">'+esc(s.sold_at)+'</span></div><div class="item-name">'+esc(item.name||'不明')+'</div>'+(customer.name?'<div class="item-sub">&#128100; '+esc(customer.name)+'</div>':'')+'<div class="price-row"><span class="price-tag">販売 '+fmt(s.sell_price)+'</span>'+(s.fee_rate?'<span class="price-tag">手数料 '+fmt(Math.round(s.sell_price*s.fee_rate/100))+'('+s.fee_rate+'%)</span>':'')+(s.shipping_fee?'<span class="price-tag">送料 '+fmt(s.shipping_fee)+'</span>':'')+'<span class="price-tag" style="color:'+(net>=0?'#27ae60':'#e74c3c')+';font-weight:700">純利 '+fmt(net)+'</span></div>'+(s.note?'<div class="item-sub">'+esc(s.note)+'</div>':'')+'</div>'});document.getElementById('tab-sales').innerHTML=h}
+function renderSales(){let h='<h2 class="section-title">販売記録</h2>';if(!sales.length)h+='<div class="empty">販売記録がありません</div>';sales.forEach(s=>{const item=items.find(i=>i.id===s.item_id)||{};const customer=customers.find(c=>c.id===s.customer_id)||{};const net=s.net_profit!=null?s.net_profit:(s.sell_price||0)-(item.buy_price||0);h+='<div class="card"><div class="row-between"><span class="code-badge">'+esc(item.code||'-')+'</span><span class="item-sub">'+esc(s.sold_at)+'</span></div><div class="item-name">'+esc(item.name||'不明')+'</div>'+(customer.name?'<div class="item-sub">&#128100; '+esc(customer.name)+'</div>':'')+'<div class="price-row"><span class="price-tag">販売 '+fmt(s.sell_price)+'</span>'+(s.fee_rate?'<span class="price-tag">手数料'+s.fee_rate+'%</span>':'')+(s.ad_rate?'<span class="price-tag">広告'+s.ad_rate+'%</span>':'')+(s.shipping_fee?'<span class="price-tag">送料 '+fmt(s.shipping_fee)+'</span>':'')+'<span class="price-tag" style="color:'+(net>=0?'#27ae60':'#e74c3c')+';font-weight:700">純利 '+fmt(net)+'</span></div>'+(s.note?'<div class="item-sub">'+esc(s.note)+'</div>':'')+'</div>'});document.getElementById('tab-sales').innerHTML=h}
 function renderCustomers(){
   let h='<div class="row-between"><h2 class="section-title">顧客一覧</h2><button class="add-btn" onclick="openAddCustomer()">+ 追加</button></div>';
   if(!customers.length){h+='<div class="empty">顧客を登録してください</div>';document.getElementById('tab-customers').innerHTML=h;return}
@@ -195,11 +195,13 @@ async function saveItem(id){const name=document.getElementById('f-name').value;c
 function calcNetProfit(){
   const price=+document.getElementById('f-sprice').value||0;
   const rate=+document.getElementById('f-fee-rate').value||0;
+  const adRate=+document.getElementById('f-ad-rate').value||0;
   const ship=+document.getElementById('f-ship').value||0;
   const buyPrice=+document.getElementById('f-buy-hidden').value||0;
   const fee=Math.round(price*rate/100);
-  const net=price-buyPrice-fee-ship;
-  document.getElementById('f-fee-calc').textContent='手数料: ¥'+fee.toLocaleString();
+  const adFee=Math.round(price*adRate/100);
+  const net=price-buyPrice-fee-adFee-ship;
+  document.getElementById('f-fee-calc').textContent='手数料: ¥'+fee.toLocaleString()+' / 広告費: ¥'+adFee.toLocaleString();
   document.getElementById('f-net-calc').textContent='純利益: ¥'+net.toLocaleString();
   document.getElementById('f-net-calc').style.color=net>=0?'#27ae60':'#e74c3c';
 }
@@ -207,8 +209,9 @@ function openSell(id){
   const item=items.find(i=>i.id===id);if(!item)return;
   const site=item.listing_site||'';
   const defaultRate=site==='メルカリ'?10:site==='ヤフオク'?10:site==='ラクマ'?6:0;
+  const defaultAd=site==='メルカリ'?5:0;
   const defaultShip=item.shipping_fee||0;
-  document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button><div class="modal-title">販売登録</div><div class="card" style="margin-bottom:14px"><div class="item-name">'+esc(item.name)+'</div><div class="item-sub">'+esc(item.code)+(site?' / '+esc(site):'')+'</div></div><input type="hidden" id="f-buy-hidden" value="'+item.buy_price+'"><label class="field-label">販売価格(円)</label><input class="field-input" id="f-sprice" type="number" value="'+item.sell_price+'" oninput="calcNetProfit()"><label class="field-label">販売手数料率(%)</label><input class="field-input" id="f-fee-rate" type="number" value="'+defaultRate+'" oninput="calcNetProfit()"><label class="field-label">送料(円)</label><input class="field-input" id="f-ship" type="number" value="'+defaultShip+'" oninput="calcNetProfit()"><div style="background:#f5f0eb;border-radius:8px;padding:10px;margin-top:12px"><div id="f-fee-calc" style="font-size:13px;color:#888;margin-bottom:4px">手数料: ¥0</div><div id="f-net-calc" style="font-size:16px;font-weight:700;color:#27ae60">純利益: ¥0</div></div><label class="field-label">販売日</label><input class="field-input" id="f-sdate" type="date" value="'+today()+'"><label class="field-label">顧客</label><select class="field-input" id="f-customer"><option value="">選択しない</option>'+customers.map(function(c){return'<option value="'+c.id+'">'+esc(c.name)+'</option>'}).join('')+'</select><label class="field-label">メモ</label><input class="field-input" id="f-snote" placeholder="任意"><button class="save-btn" style="background:#27ae60" onclick="saveSell('+id+')">販売確定</button></div>';
+  document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button><div class="modal-title">販売登録</div><div class="card" style="margin-bottom:14px"><div class="item-name">'+esc(item.name)+'</div><div class="item-sub">'+esc(item.code)+(site?' / '+esc(site):'')+'</div></div><input type="hidden" id="f-buy-hidden" value="'+item.buy_price+'"><label class="field-label">販売価格(円)</label><input class="field-input" id="f-sprice" type="number" value="'+item.sell_price+'" oninput="calcNetProfit()"><label class="field-label">販売手数料率(%)</label><input class="field-input" id="f-fee-rate" type="number" value="'+defaultRate+'" oninput="calcNetProfit()"><label class="field-label">広告費率(%)</label><input class="field-input" id="f-ad-rate" type="number" value="'+defaultAd+'" oninput="calcNetProfit()"><label class="field-label">送料(円)</label><input class="field-input" id="f-ship" type="number" value="'+defaultShip+'" oninput="calcNetProfit()"><div style="background:#f5f0eb;border-radius:8px;padding:10px;margin-top:12px"><div id="f-fee-calc" style="font-size:13px;color:#888;margin-bottom:4px">手数料: ¥0 / 広告費: ¥0</div><div id="f-net-calc" style="font-size:16px;font-weight:700;color:#27ae60">純利益: ¥0</div></div><label class="field-label">販売日</label><input class="field-input" id="f-sdate" type="date" value="'+today()+'"><label class="field-label">顧客</label><select class="field-input" id="f-customer"><option value="">選択しない</option>'+customers.map(function(c){return'<option value="'+c.id+'">'+esc(c.name)+'</option>'}).join('')+'</select><label class="field-label">メモ</label><input class="field-input" id="f-snote" placeholder="任意"><button class="save-btn" style="background:#27ae60" onclick="saveSell('+id+')">販売確定</button></div>';
   document.getElementById('modal').classList.add('show');
   calcNetProfit();
 }
@@ -217,24 +220,4 @@ async function saveSell(itemId){
   const date=document.getElementById('f-sdate').value;
   const note=document.getElementById('f-snote').value;
   const fee_rate=+document.getElementById('f-fee-rate').value||0;
-  const shipping_fee=+document.getElementById('f-ship').value||0;
-  const customer_id=document.getElementById('f-customer')?+document.getElementById('f-customer').value||null:null;
-  const buyPrice=+document.getElementById('f-buy-hidden').value||0;
-  const fee=Math.round(price*fee_rate/100);
-  const net_profit=price-buyPrice-fee-shipping_fee;
-  if(!price)return alert('販売価格を入力してください');
-  await sbFetch('sales',{method:'POST',body:JSON.stringify({item_id:itemId,sell_price:price,sold_at:date,note,customer_id,fee_rate,shipping_fee,net_profit})});
-  await sbFetch('items?id=eq.'+itemId,{method:'PATCH',body:JSON.stringify({status:'sold'})});
-  await load();closeModal();
-}
-function openAddCustomer(){document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button><div class="modal-title">顧客追加</div><label class="field-label">名前 *</label><input class="field-input" id="f-cname" placeholder="例: 山田太郎"><label class="field-label">連絡先</label><input class="field-input" id="f-ccontact" placeholder="電話番号・メール等"><label class="field-label">メモ</label><input class="field-input" id="f-cnote" placeholder="好みのこけし等"><button class="save-btn" onclick="saveCustomer(null)">登録する</button></div>';document.getElementById('modal').classList.add('show')}
-function openEditCustomer(id){const c=customers.find(function(c){return c.id===id});if(!c)return;document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button><div class="modal-title">顧客編集</div><label class="field-label">名前 *</label><input class="field-input" id="f-cname" value="'+esc(c.name)+'"><label class="field-label">連絡先</label><input class="field-input" id="f-ccontact" value="'+esc(c.contact||'')+'"><label class="field-label">メモ</label><input class="field-input" id="f-cnote" value="'+esc(c.note||'')+'"><button class="save-btn" onclick="saveCustomer('+id+')">保存する</button></div>';document.getElementById('modal').classList.add('show')}
-async function saveCustomer(id){const name=document.getElementById('f-cname').value;if(!name)return alert('名前を入力してください');const row={name,contact:document.getElementById('f-ccontact').value,note:document.getElementById('f-cnote').value};if(id)await sbFetch('customers?id=eq.'+id,{method:'PATCH',body:JSON.stringify(row)});else await sbFetch('customers',{method:'POST',body:JSON.stringify(row)});await load();closeModal()}
-function returnToStock(id){const item=items.find(i=>i.id===id);if(!item)return;if(!confirm(item.name+'を在庫に戻しますか？'))return;sbFetch('items?id=eq.'+id,{method:'PATCH',body:JSON.stringify({status:'in_stock'})}).then(function(){load()})}
-function closeModal(){document.getElementById('modal').classList.remove('show');document.getElementById('modal').innerHTML=''}
-const urlParams=new URLSearchParams(location.search);
-const scannedCode=urlParams.get('code');
-load().then(()=>{if(scannedCode){const item=items.find(i=>i.code===scannedCode);if(item){showTab('items',document.querySelectorAll('.nav-btn')[1]);searchWord=scannedCode;renderItems()}}});
-</script>
-</body>
-</html>
+  const
