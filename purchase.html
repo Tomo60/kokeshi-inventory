@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="こけし仕入帳"/>
+<title>こけし仕入帳</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Hiragino Sans','Yu Gothic',sans-serif}
+body{background:#f0f4f0}
+#app{max-width:430px;margin:0 auto;min-height:100vh;padding-bottom:70px}
+.header{background:#2c5f2e;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:10}
+.header-title{font-size:18px;font-weight:700;letter-spacing:2px}
+.content{padding:12px 14px}
+.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#fff;display:flex;border-top:1px solid #d0e0d0;z-index:20}
+.nav-btn{flex:1;border:none;background:none;padding:8px 0;cursor:pointer;color:#999;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;font-family:inherit}
+.nav-btn.active{color:#2c5f2e}
+.nav-icon{font-size:20px}
+.section-title{font-size:15px;font-weight:700;color:#1a3d1c;margin-bottom:10px;margin-top:14px}
+.card{background:#fff;border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+.item-name{font-size:15px;font-weight:700;color:#1a3d1c;margin-bottom:2px}
+.item-sub{font-size:12px;color:#888}
+.price-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;margin-bottom:4px}
+.price-tag{font-size:12px;color:#555;background:#e8f5e9;padding:2px 8px;border-radius:6px}
+.row-between{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.add-btn{background:#2c5f2e;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:13px;cursor:pointer;font-family:inherit}
+.edit-btn{background:#e8f5e9;color:#2c5f2e;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+.link-btn{background:#2980b9;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+.empty{text-align:center;color:#aaa;padding:30px;font-size:13px}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:50;display:none;align-items:flex-end;justify-content:center}
+.overlay.show{display:flex}
+.modal-box{background:#fff;width:100%;max-width:430px;border-radius:16px 16px 0 0;padding:20px 18px 32px;max-height:90vh;overflow-y:auto}
+.modal-title{font-size:16px;font-weight:700;color:#1a3d1c;margin-bottom:14px}
+.close-btn{float:right;background:none;border:none;font-size:18px;cursor:pointer;color:#888}
+.field-label{display:block;font-size:12px;color:#666;margin-bottom:3px;margin-top:10px}
+.field-input{width:100%;border:1px solid #ddd;border-radius:8px;padding:8px 10px;font-size:14px;background:#fafafa;font-family:inherit}
+.save-btn{margin-top:18px;width:100%;background:#2c5f2e;color:#fff;border:none;border-radius:10px;padding:12px 0;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.tab{display:none}.tab.active{display:block}
+.source-badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 10px;border-radius:10px;background:#e8f5e9;color:#2c5f2e}
+.photo-preview{width:100%;height:200px;object-fit:cover;border-radius:10px;margin-top:8px;display:none}
+.photo-thumb{width:70px;height:70px;object-fit:cover;border-radius:8px;float:right;margin-left:10px}
+.photo-upload{width:100%;border:2px dashed #ccc;border-radius:8px;padding:20px;text-align:center;cursor:pointer;color:#aaa;font-size:13px;margin-top:10px;background:#fafafa}
+.calc-box{background:#e8f5e9;border-radius:8px;padding:12px;margin-top:12px}
+.calc-result{font-size:20px;font-weight:700;color:#2c5f2e;margin-top:4px}
+.item-card{background:#f9f9f9;border-radius:8px;padding:10px;margin-bottom:8px;border:1px solid #eee}
+.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px}
+.kpi-card{background:#fff;border-radius:10px;padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+.kpi-label{font-size:11px;color:#888;margin-bottom:4px}
+.kpi-value{font-size:18px;font-weight:700}
+.inventory-link{background:#6b2737;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;font-family:inherit;display:block;text-align:center;text-decoration:none;margin-bottom:12px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <span class="nav-icon">&#128230;</span>
+    <span class="header-title">こけし仕入帳</span>
+  </div>
+  <div class="content">
+    <div id="tab-dashboard" class="tab active"></div>
+    <div id="tab-purchases" class="tab"></div>
+  </div>
+  <div class="nav">
+    <button class="nav-btn active" onclick="showTab('dashboard',this)"><span class="nav-icon">&#128202;</span>ダッシュボード</button>
+    <button class="nav-btn" onclick="showTab('purchases',this)"><span class="nav-icon">&#128230;</span>仕入記録</button>
+  </div>
+</div>
+<div class="overlay" id="modal" onclick="if(event.target===this)closeModal()"></div>
+
+<script>
+const SB_URL="https://yjhhrqujmemlzghvvomx.supabase.co";
+const SB_KEY="sb_publishable_utdf4r58eY6WQKMQbZ-2UA_rwUAQe2v";
+let purchases=[], purchaseItems=[], items=[];
+
+const fmt=n=>'¥'+Number(n).toLocaleString();
+const today=()=>new Date().toISOString().slice(0,10);
+const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+const SOURCE_TYPES=[
+  {value:'mercari',label:'メルカリ'},
+  {value:'yahoo',label:'ヤフオク'},
+  {value:'rakuma',label:'ラクマ'},
+  {value:'flea',label:'フリーマーケット'},
+  {value:'antique',label:'骨董市'},
+  {value:'shop',label:'骨董店'},
+  {value:'other',label:'その他'}
+];
+
+async function sbFetch(path,opts={}){
+  const res=await fetch(SB_URL+'/rest/v1/'+path,{...opts,headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json',Prefer:'return=representation',...(opts.headers||{})}});
+  const text=await res.text();let data;try{data=JSON.parse(text)}catch(e){data=text}return{data,ok:res.ok}
+}
+
+async function uploadPhoto(file){
+  const ext=file.name.split('.').pop();const path='purchase-'+Date.now()+'.'+ext;
+  const res=await fetch(SB_URL+'/storage/v1/object/kokeshi-photos/'+path,{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':file.type},body:file});
+  if(!res.ok)return null;return SB_URL+'/storage/v1/object/public/kokeshi-photos/'+path
+}
+
+async function load(){
+  const[rp,ri]=await Promise.all([
+    sbFetch('purchases?select=*&order=created_at.desc'),
+    sbFetch('items?select=*&order=created_at.desc')
+  ]);
+  purchases=Array.isArray(rp.data)?rp.data:[];
+  items=Array.isArray(ri.data)?ri.data:[];
+  renderAll();
+}
+
+function renderAll(){renderDashboard();renderPurchases()}
+
+function renderDashboard(){
+  const totalAmount=purchases.reduce((s,p)=>s+(p.total_amount||0),0);
+  const totalItems=purchases.reduce((s,p)=>s+(p.quantity||0),0);
+  const avgAmount=totalItems>0?Math.round(totalAmount/totalItems):0;
+
+  let h='<h2 class="section-title">仕入サマリー</h2>';
+  h+='<div class="card-grid">';
+  h+=kpi('総仕入額',fmt(totalAmount),'#2c5f2e');
+  h+=kpi('総仕入点数',totalItems+'点','#2980b9');
+  h+=kpi('仕入回数',purchases.length+'回','#8e44ad');
+  h+=kpi('平均仕入値',fmt(avgAmount),'#e67e22');
+  h+='</div>';
+  h+='<a href="https://kokeshi-inventory.vercel.app" class="inventory-link">&#128230; 在庫アプリを開く</a>';
+  h+='<h2 class="section-title">最近の仕入れ</h2>';
+  purchases.slice(0,5).forEach(p=>{h+=purchaseCard(p,true)});
+  document.getElementById('tab-dashboard').innerHTML=h;
+}
+
+function kpi(l,v,c){return '<div class="kpi-card" style="border-top:3px solid '+c+'"><div class="kpi-label">'+l+'</div><div class="kpi-value" style="color:'+c+'">'+v+'</div></div>'}
+
+function purchaseCard(p,compact){
+  const sourceLabel=(SOURCE_TYPES.find(s=>s.value===p.source_type)||{}).label||p.source_type||'不明';
+  let h='<div class="card">';
+  if(p.photo_url)h+='<img src="'+esc(p.photo_url)+'" class="photo-thumb" onerror="this.style.display=\'none\'">';
+  h+='<div class="row-between"><span class="source-badge">'+esc(sourceLabel)+'</span><span class="item-sub">'+esc(p.purchase_date||'')+'</span></div>';
+  h+='<div class="item-name" style="margin-top:6px">'+esc(p.source||'')+'</div>';
+  h+='<div class="price-row">';
+  h+='<span class="price-tag">合計 '+fmt(p.total_amount)+'</span>';
+  h+='<span class="price-tag">'+p.quantity+'点</span>';
+  h+='<span class="price-tag" style="color:#2c5f2e;font-weight:700">平均 '+fmt(p.avg_amount)+'/点</span>';
+  h+='</div>';
+  if(p.note)h+='<div class="item-sub">📝 '+esc(p.note)+'</div>';
+  if(!compact){
+    h+='<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">';
+    h+='<button class="edit-btn" onclick="openEditPurchase('+p.id+')">編集</button>';
+    h+='<button class="link-btn" onclick="openLinkItems('+p.id+')">在庫に追加</button>';
+    h+='</div>';
+  }
+  h+='<div style="clear:both"></div></div>';
+  return h;
+}
+
+function renderPurchases(){
+  let h='<div class="row-between"><h2 class="section-title">仕入記録</h2><button class="add-btn" onclick="openAddPurchase()">+ 仕入登録</button></div>';
+  if(!purchases.length)h+='<div class="empty">仕入れを登録してください</div>';
+  purchases.forEach(p=>{h+=purchaseCard(p,false)});
+  document.getElementById('tab-purchases').innerHTML=h;
+}
+
+function showTab(tab,btn){
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+}
+
+function calcAvg(){
+  const total=+document.getElementById('f-total').value||0;
+  const qty=+document.getElementById('f-qty').value||0;
+  const avg=qty>0?Math.round(total/qty):0;
+  document.getElementById('f-avg-result').textContent='1点あたりの平均仕入値: '+fmt(avg);
+  document.getElementById('f-avg-hidden').value=avg;
+}
+
+function previewPhoto(input){
+  if(input.files&&input.files[0]){
+    const reader=new FileReader();
+    reader.onload=e=>{const img=document.getElementById('photo-preview');img.src=e.target.result;img.style.display='block'};
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+function openAddPurchase(){
+  const sourceOpts=SOURCE_TYPES.map(s=>'<option value="'+s.value+'">'+s.label+'</option>').join('');
+  document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button>'+
+    '<div class="modal-title">仕入登録</div>'+
+    '<label class="field-label">仕入先種別 *</label><select class="field-input" id="f-source-type">'+sourceOpts+'</select>'+
+    '<label class="field-label">仕入先名（出品者名・場所など）</label><input class="field-input" id="f-source" placeholder="例: ○○フリマ・出品者名など">'+
+    '<label class="field-label">仕入日 *</label><input class="field-input" id="f-date" type="date" value="'+today()+'">'+
+    '<label class="field-label">合計仕入額(円) *</label><input class="field-input" id="f-total" type="number" placeholder="例: 15000" oninput="calcAvg()">'+
+    '<label class="field-label">仕入点数 *</label><input class="field-input" id="f-qty" type="number" placeholder="例: 5" oninput="calcAvg()">'+
+    '<input type="hidden" id="f-avg-hidden" value="0">'+
+    '<div class="calc-box"><div class="item-sub">自動計算</div><div class="calc-result" id="f-avg-result">1点あたりの平均仕入値: ¥0</div></div>'+
+    '<label class="field-label">メモ</label><input class="field-input" id="f-note" placeholder="まとめ買いの内容など">'+
+    '<label class="field-label">写真（仕入れ全体）</label>'+
+    '<div class="photo-upload" onclick="document.getElementById(\'f-photo\').click()">&#128247; タップして写真を選択</div>'+
+    '<input type="file" id="f-photo" accept="image/*" style="display:none" onchange="previewPhoto(this)">'+
+    '<img id="photo-preview" class="photo-preview">'+
+    '<button class="save-btn" onclick="savePurchase(null)">登録する</button></div>';
+  document.getElementById('modal').classList.add('show');
+}
+
+function openEditPurchase(id){
+  const p=purchases.find(p=>p.id===id);if(!p)return;
+  const sourceOpts=SOURCE_TYPES.map(s=>'<option value="'+s.value+'"'+(s.value===p.source_type?' selected':'')+'>'+s.label+'</option>').join('');
+  document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button>'+
+    '<div class="modal-title">仕入編集</div>'+
+    (p.photo_url?'<img src="'+esc(p.photo_url)+'" style="width:100%;height:180px;object-fit:cover;border-radius:10px;margin-bottom:10px">':'')+
+    '<label class="field-label">仕入先種別 *</label><select class="field-input" id="f-source-type">'+sourceOpts+'</select>'+
+    '<label class="field-label">仕入先名</label><input class="field-input" id="f-source" value="'+esc(p.source||'')+'">'+
+    '<label class="field-label">仕入日 *</label><input class="field-input" id="f-date" type="date" value="'+esc(p.purchase_date||today())+'">'+
+    '<label class="field-label">合計仕入額(円) *</label><input class="field-input" id="f-total" type="number" value="'+p.total_amount+'" oninput="calcAvg()">'+
+    '<label class="field-label">仕入点数 *</label><input class="field-input" id="f-qty" type="number" value="'+p.quantity+'" oninput="calcAvg()">'+
+    '<input type="hidden" id="f-avg-hidden" value="'+p.avg_amount+'">'+
+    '<div class="calc-box"><div class="item-sub">自動計算</div><div class="calc-result" id="f-avg-result">1点あたりの平均仕入値: '+fmt(p.avg_amount)+'</div></div>'+
+    '<label class="field-label">メモ</label><input class="field-input" id="f-note" value="'+esc(p.note||'')+'">'+
+    '<label class="field-label">写真を変更</label>'+
+    '<div class="photo-upload" onclick="document.getElementById(\'f-photo\').click()">&#128247; タップして写真を選択</div>'+
+    '<input type="file" id="f-photo" accept="image/*" style="display:none" onchange="previewPhoto(this)">'+
+    '<img id="photo-preview" class="photo-preview">'+
+    '<button class="save-btn" onclick="savePurchase('+id+')">保存する</button></div>';
+  document.getElementById('modal').classList.add('show');
+}
+
+async function savePurchase(id){
+  const total=+document.getElementById('f-total').value;
+  const qty=+document.getElementById('f-qty').value;
+  if(!total||!qty)return alert('合計仕入額と仕入点数を入力してください');
+  const avg=Math.round(total/qty);
+  let photo_url=id?(purchases.find(p=>p.id===id)||{}).photo_url:null;
+  const photoFile=document.getElementById('f-photo').files[0];
+  if(photoFile){const url=await uploadPhoto(photoFile);if(url)photo_url=url}
+  const row={
+    source_type:document.getElementById('f-source-type').value,
+    source:document.getElementById('f-source').value,
+    purchase_date:document.getElementById('f-date').value,
+    total_amount:total,
+    quantity:qty,
+    avg_amount:avg,
+    note:document.getElementById('f-note').value,
+    photo_url
+  };
+  if(id)await sbFetch('purchases?id=eq.'+id,{method:'PATCH',body:JSON.stringify(row)});
+  else await sbFetch('purchases',{method:'POST',body:JSON.stringify(row)});
+  await load();closeModal();
+}
+
+function openLinkItems(purchaseId){
+  const p=purchases.find(p=>p.id===purchaseId);if(!p)return;
+  const inStockItems=items.filter(i=>i.status==='in_stock');
+  document.getElementById('modal').innerHTML='<div class="modal-box"><button class="close-btn" onclick="closeModal()">&#x2715;</button>'+
+    '<div class="modal-title">在庫に追加</div>'+
+    '<div class="calc-box" style="margin-bottom:14px">'+
+    '<div class="item-sub">この仕入れから</div>'+
+    '<div class="calc-result">平均仕入値 '+fmt(p.avg_amount)+'/点</div>'+
+    '<div class="item-sub" style="margin-top:4px">で在庫アプリにこけしを追加します</div></div>'+
+    '<label class="field-label">産地 *</label><input class="field-input" id="f-origin" placeholder="例: 津軽" oninput="updateCode()">'+
+    '<label class="field-label">管理コード（自動）</label><input class="field-input" id="f-code" readonly style="background:#f0f0f0">'+
+    '<label class="field-label">名前 *</label><input class="field-input" id="f-name" placeholder="例: 津軽こけし">'+
+    '<label class="field-label">種類</label><input class="field-input" id="f-type" value="伝統工芸">'+
+    '<label class="field-label">仕入値(円)（平均値が自動入力）</label><input class="field-input" id="f-buy" type="number" value="'+p.avg_amount+'">'+
+    '<label class="field-label">売値(円) *</label><input class="field-input" id="f-sell" type="number" placeholder="例: 5000">'+
+    '<label class="field-label">メモ</label><input class="field-input" id="f-item-note" placeholder="任意">'+
+    '<label class="field-label">写真（このこけし）</label>'+
+    '<div class="photo-upload" onclick="document.getElementById(\'f-item-photo\').click()">&#128247; タップして写真を選択</div>'+
+    '<input type="file" id="f-item-photo" accept="image/*" style="display:none" onchange="previewItemPhoto(this)">'+
+    '<img id="item-photo-preview" class="photo-preview">'+
+    '<button class="save-btn" onclick="addToInventory('+purchaseId+')">在庫に追加する</button></div>';
+  document.getElementById('modal').classList.add('show');
+  updateCode();
+}
+
+function previewItemPhoto(input){
+  if(input.files&&input.files[0]){
+    const reader=new FileReader();
+    reader.onload=e=>{const img=document.getElementById('item-photo-preview');img.src=e.target.result;img.style.display='block'};
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+function updateCode(){
+  const origin=document.getElementById('f-origin').value;
+  const prefix=(origin||'').slice(0,2)||'??';
+  const existing=items.filter(i=>(i.code||'').startsWith(prefix));
+  const num=String(existing.length+1).padStart(3,'0');
+  document.getElementById('f-code').value=prefix+'-'+num;
+}
+
+async function addToInventory(purchaseId){
+  const name=document.getElementById('f-name').value;
+  const origin=document.getElementById('f-origin').value;
+  const buy=+document.getElementById('f-buy').value;
+  const sell=+document.getElementById('f-sell').value;
+  if(!name||!origin||!buy||!sell)return alert('必須項目を入力してください');
+  const code=document.getElementById('f-code').value;
+  const type=document.getElementById('f-type').value;
+  const note=document.getElementById('f-item-note').value;
+  let photo_url=null;
+  const photoFile=document.getElementById('f-item-photo').files[0];
+  if(photoFile){const url=await uploadPhoto(photoFile);if(url)photo_url=url}
+  const row={code,name,origin,type,buy_price:buy,sell_price:sell,note,photo_url,status:'in_stock'};
+  const result=await sbFetch('items',{method:'POST',body:JSON.stringify(row)});
+  if(result.ok&&result.data&&result.data[0]){
+    const itemId=result.data[0].id;
+    await sbFetch('purchase_items',{method:'POST',body:JSON.stringify({purchase_id:purchaseId,item_id:itemId})});
+  }
+  await load();
+  closeModal();
+  alert('在庫アプリに追加しました！');
+}
+
+function closeModal(){
+  document.getElementById('modal').classList.remove('show');
+  document.getElementById('modal').innerHTML='';
+}
+
+load();
+</script>
+</body>
+</html>
