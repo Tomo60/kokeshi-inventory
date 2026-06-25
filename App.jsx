@@ -35,10 +35,65 @@ const DEMO_TRANSACTIONS = [
 const fmt = (n) => `¥${Number(n).toLocaleString()}`;
 const today = () => new Date().toISOString().slice(0, 10);
 
+function parseMercariText(text) {
+  const results = [];
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  let i = 0;
+  while (i < lines.length) {
+    const dateMatch = lines[i].match(/^(\d{4}\/\d{2}\/\d{2})$/);
+    if (dateMatch) {
+      const soldDate = dateMatch[1].replace(/\//g, '-');
+      let title = '';
+      let sellPrice = 0;
+      let fee = 0;
+      let shippingFee = 0;
+      let netProfit = 0;
+
+      for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
+        const l = lines[j];
+        if (l.includes('サムネイル')) continue;
+        if (/^[\d,¥%\-]+$/.test(l)) continue;
+        if (l === '---') continue;
+        if (/^\d+%$/.test(l)) continue;
+        if (l.length > 5 && !l.match(/^[¥\d,]+$/)) {
+          title = l;
+          break;
+        }
+      }
+
+      const nums = [];
+      for (let j = Math.max(0, i - 15); j < i; j++) {
+        const l = lines[j];
+        const numMatch = l.replace(/[¥,]/g, '').match(/^(\d+)$/);
+        if (numMatch) nums.push(parseInt(numMatch[1]));
+      }
+
+      if (nums.length >= 4) {
+        sellPrice = nums[nums.length - 4];
+        fee = nums[nums.length - 3];
+        shippingFee = nums[nums.length - 2];
+        netProfit = nums[nums.length - 1];
+      } else if (nums.length >= 1) {
+        netProfit = nums[nums.length - 1];
+      }
+
+      if (title && soldDate) {
+        results.push({ title, sell_price: sellPrice, fee, shipping_fee: shippingFee, net_profit: netProfit, sold_at: soldDate });
+      }
+      i++;
+    } else {
+      i++;
+    }
+  }
+  return results;
+}
+
 export default function KokeshiInventory() {
   const [tab, setTab] = useState("dashboard");
   const [items, setItems] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [useDemo, setUseDemo] = useState(false);
@@ -50,9 +105,10 @@ export default function KokeshiInventory() {
     setLoading(true);
     setError(null);
     try {
-      const [ri, rt] = await Promise.all([
+      const [ri, rt, rs] = await Promise.all([
         sbFetch("items?select=*&order=id"),
         sbFetch("transactions?select=*&order=id"),
+        sbFetch("sales?select=*&order=sold_at.desc"),
       ]);
       if (!ri.ok || !rt.ok) {
         const errMsg = JSON.stringify(ri.ok ? rt.data : ri.data);
@@ -60,9 +116,11 @@ export default function KokeshiInventory() {
         setUseDemo(true);
         setItems(DEMO_ITEMS);
         setTransactions(DEMO_TRANSACTIONS);
+        setSales([]);
       } else {
         setItems(Array.isArray(ri.data) ? ri.data : []);
         setTransactions(Array.isArray(rt.data) ? rt.data : []);
+        setSales(Array.isArray(rs.data) ? rs.data : []);
         setUseDemo(false);
       }
     } catch (e) {
@@ -70,6 +128,7 @@ export default function KokeshiInventory() {
       setUseDemo(true);
       setItems(DEMO_ITEMS);
       setTransactions(DEMO_TRANSACTIONS);
+      setSales([]);
     }
     setLoading(false);
   }
@@ -87,11 +146,7 @@ export default function KokeshiInventory() {
         {useDemo && <span style={styles.demoBadge}>デモ</span>}
       </div>
 
-      {error && (
-        <div style={styles.errorBanner}>
-          ⚠️ {error}
-        </div>
-      )}
+      {error && <div style={styles.errorBanner}>⚠️ {error}</div>}
 
       {alertItems.length > 0 && !error && (
         <div style={styles.alertBanner}>
@@ -106,7 +161,7 @@ export default function KokeshiInventory() {
           <>
             {tab === "dashboard" && <Dashboard items={items} totalRevenue={totalRevenue} totalCost={totalCost} totalProfit={totalProfit} alertItems={alertItems} />}
             {tab === "items" && <ItemList items={items} setModal={setModal} />}
-            {tab === "transactions" && <TransactionList transactions={transactions} items={items} setModal={setModal} />}
+            {tab === "transactions" && <TransactionList transactions={transactions} items={items} setModal={setModal} sales={sales} setSales={setSales} useDemo={useDemo} onReload={loadData} />}
           </>
         )}
       </div>
@@ -115,7 +170,7 @@ export default function KokeshiInventory() {
         {[
           { key: "dashboard", label: "ダッシュボード", icon: "📊" },
           { key: "items", label: "在庫", icon: "🪆" },
-          { key: "transactions", label: "仕入・販売", icon: "📝" },
+          { key: "transactions", label: "販売記録", icon: "💰" },
         ].map(({ key, label, icon }) => (
           <button key={key} style={{ ...styles.navBtn, ...(tab === key ? styles.navBtnActive : {}) }} onClick={() => setTab(key)}>
             <span style={styles.navIcon}>{icon}</span>
@@ -127,6 +182,7 @@ export default function KokeshiInventory() {
       {modal?.type === "addItem" && <ItemModal onClose={() => setModal(null)} onSave={loadData} useDemo={useDemo} items={items} setItems={setItems} />}
       {modal?.type === "editItem" && <ItemModal item={modal.data} onClose={() => setModal(null)} onSave={loadData} useDemo={useDemo} items={items} setItems={setItems} />}
       {modal?.type === "addTx" && <TxModal items={items} onClose={() => setModal(null)} onSave={loadData} useDemo={useDemo} transactions={transactions} setTransactions={setTransactions} setItems={setItems} />}
+      {modal?.type === "mercariImport" && <MercariImportModal onClose={() => setModal(null)} onSave={loadData} useDemo={useDemo} setSales={setSales} />}
     </div>
   );
 }
@@ -206,34 +262,180 @@ function ItemList({ items, setModal }) {
   );
 }
 
-function TransactionList({ transactions, items, setModal }) {
+function TransactionList({ transactions, items, setModal, sales, setSales, useDemo, onReload }) {
+  const [subTab, setSubTab] = useState("sales");
   const getName = (id) => items.find((i) => i.id === id)?.name || "不明";
   const sorted = [...transactions].sort((a, b) => b.date?.localeCompare(a.date));
+  const totalSalesProfit = sales.reduce((s, t) => s + (t.net_profit || 0), 0);
+  const totalSalesRevenue = sales.reduce((s, t) => s + (t.sell_price || 0), 0);
+
   return (
     <div>
-      <div style={styles.rowBetween}>
-        <h2 style={styles.sectionTitle}>仕入・販売記録</h2>
-        <button style={styles.addBtn} onClick={() => setModal({ type: "addTx" })}>＋ 記録</button>
+      <div style={styles.subTabRow}>
+        <button style={{ ...styles.subTab, ...(subTab === "sales" ? styles.subTabActive : {}) }} onClick={() => setSubTab("sales")}>
+          💰 メルカリ売上
+        </button>
+        <button style={{ ...styles.subTab, ...(subTab === "transactions" ? styles.subTabActive : {}) }} onClick={() => setSubTab("transactions")}>
+          📝 仕入・販売
+        </button>
       </div>
-      {sorted.map((tx) => (
-        <div key={tx.id} style={styles.card}>
+
+      {subTab === "sales" && (
+        <div>
           <div style={styles.rowBetween}>
-            <span style={{ ...styles.txBadge, background: tx.type === "sale" ? "#eafaf1" : "#eaf0fb", color: tx.type === "sale" ? "#1e8449" : "#2980b9" }}>
-              {tx.type === "sale" ? "販売" : "仕入"}
-            </span>
-            <span style={styles.itemSub}>{tx.date}</span>
+            <h2 style={styles.sectionTitle}>メルカリ売上</h2>
+            <button style={styles.mercariBtn} onClick={() => setModal({ type: "mercariImport" })}>📋 取込</button>
           </div>
-          <div style={styles.itemName}>{getName(tx.item_id)}</div>
-          <div style={styles.priceRow}>
-            <span style={styles.priceTag}>{tx.quantity} 点</span>
-            <span style={styles.priceTag}>{fmt(tx.unit_price)} / 点</span>
-            <span style={{ ...styles.priceTag, fontWeight: 700 }}>合計 {fmt(tx.unit_price * tx.quantity)}</span>
-          </div>
-          {tx.note && <div style={styles.itemSub}>📝 {tx.note}</div>}
+          {sales.length > 0 && (
+            <div style={styles.cardGrid}>
+              <KpiCard label="売上合計" value={fmt(totalSalesRevenue)} color="#e74c3c" />
+              <KpiCard label="純利益合計" value={fmt(totalSalesProfit)} color="#8e44ad" />
+            </div>
+          )}
+          {sales.map((s) => (
+            <div key={s.id} style={styles.card}>
+              <div style={styles.rowBetween}>
+                <span style={styles.mercadiBadge}>メルカリ</span>
+                <span style={styles.itemSub}>{s.sold_at}</span>
+              </div>
+              <div style={styles.itemName}>{s.note || "商品名なし"}</div>
+              <div style={styles.priceRow}>
+                <span style={styles.priceTag}>売価 {fmt(s.sell_price || 0)}</span>
+                <span style={styles.priceTag}>送料 {fmt(s.shipping_fee || 0)}</span>
+                <span style={{ ...styles.priceTag, color: "#8e44ad", fontWeight: 700 }}>純利益 {fmt(s.net_profit || 0)}</span>
+              </div>
+            </div>
+          ))}
+          {sales.length === 0 && (
+            <div style={styles.emptyMercari}>
+              <div style={{ fontSize: 36, marginBottom: 8 }}>📋</div>
+              <div style={{ fontWeight: 700, color: "#4a1a24", marginBottom: 4 }}>売上データがありません</div>
+              <div style={{ fontSize: 12, color: "#aaa" }}>「取込」ボタンからメルカリの販売履歴を貼り付けてください</div>
+            </div>
+          )}
         </div>
-      ))}
-      {transactions.length === 0 && <div style={styles.empty}>記録がまだありません</div>}
+      )}
+
+      {subTab === "transactions" && (
+        <div>
+          <div style={styles.rowBetween}>
+            <h2 style={styles.sectionTitle}>仕入・販売記録</h2>
+            <button style={styles.addBtn} onClick={() => setModal({ type: "addTx" })}>＋ 記録</button>
+          </div>
+          {sorted.map((tx) => (
+            <div key={tx.id} style={styles.card}>
+              <div style={styles.rowBetween}>
+                <span style={{ ...styles.txBadge, background: tx.type === "sale" ? "#eafaf1" : "#eaf0fb", color: tx.type === "sale" ? "#1e8449" : "#2980b9" }}>
+                  {tx.type === "sale" ? "販売" : "仕入"}
+                </span>
+                <span style={styles.itemSub}>{tx.date}</span>
+              </div>
+              <div style={styles.itemName}>{getName(tx.item_id)}</div>
+              <div style={styles.priceRow}>
+                <span style={styles.priceTag}>{tx.quantity} 点</span>
+                <span style={styles.priceTag}>{fmt(tx.unit_price)} / 点</span>
+                <span style={{ ...styles.priceTag, fontWeight: 700 }}>合計 {fmt(tx.unit_price * tx.quantity)}</span>
+              </div>
+              {tx.note && <div style={styles.itemSub}>📝 {tx.note}</div>}
+            </div>
+          ))}
+          {transactions.length === 0 && <div style={styles.empty}>記録がまだありません</div>}
+        </div>
+      )}
     </div>
+  );
+}
+
+function MercariImportModal({ onClose, onSave, useDemo, setSales }) {
+  const [pasteText, setPasteText] = useState("");
+  const [parsed, setParsed] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [step, setStep] = useState("input");
+
+  function handleParse() {
+    const results = parseMercariText(pasteText);
+    if (results.length === 0) {
+      alert("データを読み取れませんでした。メルカリの販売履歴ページをコピーして貼り付けてください。");
+      return;
+    }
+    setParsed(results);
+    setStep("confirm");
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    if (useDemo) {
+      setSales((prev) => [...prev, ...parsed.map((r, i) => ({ ...r, id: Date.now() + i, note: r.title }))]);
+    } else {
+      for (const row of parsed) {
+        await sbFetch("sales", {
+          method: "POST",
+          body: JSON.stringify({
+            sell_price: row.sell_price,
+            shipping_fee: row.shipping_fee,
+            net_profit: row.net_profit,
+            sold_at: row.sold_at,
+            note: row.title,
+            fee_rate: 0.1,
+          }),
+        });
+      }
+      await onSave();
+    }
+    setSaving(false);
+    onClose();
+  }
+
+  return (
+    <Overlay onClose={onClose}>
+      <h3 style={styles.modalTitle}>📋 メルカリ売上取込</h3>
+      {step === "input" && (
+        <>
+          <div style={styles.importGuide}>
+            <div style={styles.guideStep}>① メルカリ → マイページ → 販売履歴を開く</div>
+            <div style={styles.guideStep}>② 画面全体を長押し → 全選択 → コピー</div>
+            <div style={styles.guideStep}>③ 下のテキストエリアに貼り付け</div>
+          </div>
+          <label style={styles.label}>販売履歴テキストを貼り付け</label>
+          <textarea
+            style={styles.textarea}
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder="ここにメルカリの販売履歴テキストを貼り付けてください…"
+            rows={8}
+          />
+          <button style={styles.saveBtn} onClick={handleParse} disabled={!pasteText.trim()}>
+            データを読み取る
+          </button>
+        </>
+      )}
+      {step === "confirm" && parsed && (
+        <>
+          <div style={{ fontSize: 13, color: "#27ae60", fontWeight: 700, marginBottom: 12 }}>
+            ✅ {parsed.length} 件のデータを読み取りました
+          </div>
+          <div style={{ maxHeight: 300, overflowY: "auto", marginBottom: 12 }}>
+            {parsed.map((r, i) => (
+              <div key={i} style={styles.previewCard}>
+                <div style={styles.itemName}>{r.title || "（タイトル不明）"}</div>
+                <div style={styles.priceRow}>
+                  <span style={styles.priceTag}>売価 {fmt(r.sell_price)}</span>
+                  <span style={styles.priceTag}>送料 {fmt(r.shipping_fee)}</span>
+                  <span style={{ ...styles.priceTag, color: "#8e44ad" }}>純利益 {fmt(r.net_profit)}</span>
+                </div>
+                <div style={styles.itemSub}>{r.sold_at}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={{ ...styles.saveBtn, background: "#aaa", flex: 1 }} onClick={() => setStep("input")}>やり直す</button>
+            <button style={{ ...styles.saveBtn, flex: 2 }} onClick={handleSave} disabled={saving}>
+              {saving ? "保存中…" : "取込む"}
+            </button>
+          </div>
+        </>
+      )}
+    </Overlay>
   );
 }
 
@@ -380,15 +582,25 @@ const styles = {
   priceRow: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, marginBottom: 4 },
   priceTag: { fontSize: 12, color: "#555", background: "#f5f0eb", padding: "2px 8px", borderRadius: 6 },
   txBadge: { fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 12 },
+  mercadiBadge: { fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 12, background: "#fce8e8", color: "#e74c3c" },
   rowBetween: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
   addBtn: { background: "#6b2737", color: "#fff", border: "none", borderRadius: 8, padding: "6px 16px", fontSize: 13, cursor: "pointer" },
+  mercariBtn: { background: "#e74c3c", color: "#fff", border: "none", borderRadius: 8, padding: "6px 16px", fontSize: 13, cursor: "pointer" },
   editBtn: { background: "#f0e6e8", color: "#6b2737", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" },
   empty: { textAlign: "center", color: "#aaa", padding: 30, fontSize: 13 },
+  emptyMercari: { textAlign: "center", color: "#aaa", padding: 40, fontSize: 13, background: "#fff", borderRadius: 12, boxShadow: "0 1px 4px #0001" },
   overlay: { position: "fixed", inset: 0, background: "#0006", zIndex: 50, display: "flex", alignItems: "flex-end" },
   modalBox: { background: "#fff", width: "100%", maxWidth: 430, margin: "0 auto", borderRadius: "16px 16px 0 0", padding: "20px 18px 32px", maxHeight: "85vh", overflowY: "auto" },
   modalTitle: { fontSize: 16, fontWeight: 700, color: "#4a1a24", marginBottom: 14, marginTop: 0 },
   closeBtn: { float: "right", background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#888" },
   label: { display: "block", fontSize: 12, color: "#666", marginBottom: 3, marginTop: 10 },
   input: { width: "100%", border: "1px solid #ddd", borderRadius: 8, padding: "8px 10px", fontSize: 14, boxSizing: "border-box", background: "#fafafa" },
+  textarea: { width: "100%", border: "1px solid #ddd", borderRadius: 8, padding: "8px 10px", fontSize: 13, boxSizing: "border-box", background: "#fafafa", resize: "vertical", lineHeight: 1.5 },
   saveBtn: { marginTop: 18, width: "100%", background: "#6b2737", color: "#fff", border: "none", borderRadius: 10, padding: "12px 0", fontSize: 15, fontWeight: 700, cursor: "pointer" },
+  subTabRow: { display: "flex", gap: 8, marginBottom: 4, marginTop: 4 },
+  subTab: { flex: 1, border: "1px solid #ddd", borderRadius: 8, padding: "8px 0", fontSize: 13, cursor: "pointer", background: "#fff", color: "#888" },
+  subTabActive: { background: "#6b2737", color: "#fff", border: "1px solid #6b2737", fontWeight: 700 },
+  importGuide: { background: "#fdf6f0", borderRadius: 8, padding: "10px 12px", marginBottom: 12, border: "1px solid #e8d5c0" },
+  guideStep: { fontSize: 12, color: "#6b2737", marginBottom: 4, lineHeight: 1.6 },
+  previewCard: { background: "#fafafa", borderRadius: 8, padding: "10px 12px", marginBottom: 8, border: "1px solid #eee" },
 };
