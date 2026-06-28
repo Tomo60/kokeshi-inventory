@@ -1,0 +1,318 @@
+[expense.html](https://github.com/user-attachments/files/29439840/expense.html)
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="こけし経費帳"/>
+<title>こけし経費帳</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Hiragino Sans','Yu Gothic',sans-serif}
+body{background:#fff8f0}
+#app{max-width:430px;margin:0 auto;min-height:100vh;padding-bottom:70px}
+.header{background:#c0392b;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:10}
+.header-title{font-size:18px;font-weight:700;letter-spacing:2px}
+.content{padding:12px 14px}
+.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#fff;display:flex;border-top:1px solid #f5cba7;z-index:20}
+.nav-btn{flex:1;border:none;background:none;padding:8px 0;cursor:pointer;color:#999;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;font-family:inherit}
+.nav-btn.active{color:#c0392b}
+.nav-icon{font-size:20px}
+.section-title{font-size:15px;font-weight:700;color:#7b241c;margin-bottom:10px;margin-top:14px}
+.card{background:#fff;border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px}
+.kpi-card{background:#fff;border-radius:10px;padding:12px 14px;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+.kpi-label{font-size:11px;color:#888;margin-bottom:4px}
+.kpi-value{font-size:18px;font-weight:700}
+.item-name{font-size:15px;font-weight:700;color:#2c1010;margin-bottom:2px}
+.item-sub{font-size:12px;color:#888}
+.price-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;margin-bottom:4px}
+.price-tag{font-size:12px;color:#555;background:#fdebd0;padding:2px 8px;border-radius:6px}
+.row-between{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.add-btn{background:#c0392b;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:13px;cursor:pointer;font-family:inherit}
+.edit-btn{background:#fdebd0;color:#c0392b;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+.empty{text-align:center;color:#aaa;padding:30px;font-size:13px}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:200;display:none;align-items:flex-end;justify-content:center}
+.overlay.show{display:flex}
+.modal-box{background:#fff;width:100%;max-width:430px;border-radius:16px 16px 0 0;padding:20px 18px 32px;max-height:90vh;overflow-y:auto}
+.modal-title{font-size:16px;font-weight:700;color:#7b241c;margin-bottom:14px}
+.close-btn{float:right;background:none;border:none;font-size:18px;cursor:pointer;color:#888}
+.field-label{display:block;font-size:12px;color:#666;margin-bottom:3px;margin-top:10px}
+.field-input{width:100%;border:1px solid #ddd;border-radius:8px;padding:8px 10px;font-size:14px;background:#fafafa;font-family:inherit}
+.save-btn{margin-top:18px;width:100%;background:#c0392b;color:#fff;border:none;border-radius:10px;padding:12px 0;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
+.tab{display:none}.tab.active{display:block}
+.cat-badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 10px;border-radius:10px;background:#fdebd0;color:#c0392b}
+.recurring-badge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#c0392b;color:#fff;margin-left:4px}
+.photo-preview{width:100%;height:200px;object-fit:cover;border-radius:10px;margin-top:8px;display:none}
+.photo-upload{width:100%;border:2px dashed #ddd;border-radius:8px;padding:20px;text-align:center;cursor:pointer;color:#aaa;font-size:13px;margin-top:10px;background:#fafafa}
+.inventory-link{background:#6b2737;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;font-family:inherit;display:block;text-align:center;text-decoration:none;margin-bottom:12px}
+.month-header{font-size:13px;font-weight:700;color:#7b241c;background:#fdebd0;padding:6px 12px;border-radius:6px;margin-bottom:8px;margin-top:12px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <span class="nav-icon">💴</span>
+    <span class="header-title">こけし経費帳</span>
+  </div>
+  <div class="content">
+    <div id="tab-dashboard" class="tab active"></div>
+    <div id="tab-expenses" class="tab"></div>
+  </div>
+  <div class="nav">
+    <button class="nav-btn active" onclick="showTab('dashboard',this)"><span class="nav-icon">📊</span>サマリー</button>
+    <button class="nav-btn" onclick="showTab('expenses',this)"><span class="nav-icon">💴</span>経費記録</button>
+  </div>
+</div>
+<div class="overlay" id="modal" onclick="if(event.target===this)closeModal()"></div>
+
+<script>
+const SB_URL="https://yjhhrqujmemlzghvvomx.supabase.co";
+const SB_KEY="sb_publishable_utdf4r58eY6WQKMQbZ-2UA_rwUAQe2v";
+let expenses=[];
+
+const fmt=n=>'¥'+Number(n).toLocaleString();
+const today=()=>new Date().toISOString().slice(0,10);
+const thisMonth=()=>new Date().toISOString().slice(0,7);
+const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+const CATS=[
+  {value:'rent',label:'家賃',icon:'🏠'},
+  {value:'packing',label:'梱包材',icon:'📦'},
+  {value:'shipping',label:'送料',icon:'🚚'},
+  {value:'platform',label:'手数料',icon:'💳'},
+  {value:'equipment',label:'備品',icon:'🛠️'},
+  {value:'other',label:'その他',icon:'📝'}
+];
+
+function getCat(value){return CATS.find(c=>c.value===value)||{label:value||'その他',icon:'📝'}}
+
+async function sbFetch(path,opts={}){
+  const res=await fetch(SB_URL+'/rest/v1/'+path,{...opts,headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json',Prefer:'return=representation',...(opts.headers||{})}});
+  const text=await res.text();let data;try{data=JSON.parse(text)}catch(e){data=text}return{data,ok:res.ok}
+}
+
+async function uploadPhoto(file){
+  const ext=file.name.split('.').pop();
+  const path='expense-'+Date.now()+'.'+ext;
+  const res=await fetch(SB_URL+'/storage/v1/object/kokeshi-photos/'+path,{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':file.type},body:file});
+  if(!res.ok)return null;
+  return SB_URL+'/storage/v1/object/public/kokeshi-photos/'+path;
+}
+
+async function load(){
+  const re=await sbFetch('expenses?select=*&order=expense_date.desc');
+  expenses=Array.isArray(re.data)?re.data:[];
+  renderAll();
+}
+
+function renderAll(){renderDashboard();renderExpenses()}
+
+function kpi(l,v,c){
+  return '<div class="kpi-card" style="border-top:3px solid '+c+'"><div class="kpi-label">'+l+'</div><div class="kpi-value" style="color:'+c+'">'+v+'</div></div>';
+}
+
+function renderDashboard(){
+  const totalAll=expenses.reduce((s,e)=>s+(e.amount||0),0);
+  const cm=thisMonth();
+  const thisMonthExp=expenses.filter(e=>(e.expense_date||'').startsWith(cm));
+  const totalMonth=thisMonthExp.reduce((s,e)=>s+(e.amount||0),0);
+  const recurring=expenses.filter(e=>e.is_recurring);
+  const totalRecurring=recurring.reduce((s,e)=>s+(e.amount||0),0);
+
+  let h='<h2 class="section-title">経費サマリー</h2>';
+  h+='<div class="card-grid">';
+  h+=kpi('今月の経費',fmt(totalMonth),'#c0392b');
+  h+=kpi('経費合計（全期間）',fmt(totalAll),'#e67e22');
+  h+=kpi('月額固定費',fmt(totalRecurring),'#8e44ad');
+  h+=kpi('経費件数',expenses.length+'件','#2980b9');
+  h+='</div>';
+  h+='<a href="index.html" class="inventory-link" style="margin-top:12px">&#128230; 在庫アプリに戻る</a>';
+
+  // カテゴリ別集計
+  h+='<h2 class="section-title">カテゴリ別合計</h2>';
+  h+='<div class="card">';
+  CATS.forEach(function(cat){
+    const catTotal=expenses.filter(e=>e.category===cat.value).reduce((s,e)=>s+(e.amount||0),0);
+    if(catTotal===0)return;
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f5f5f5">';
+    h+='<div style="display:flex;align-items:center;gap:6px"><span>'+cat.icon+'</span><span style="font-size:13px">'+cat.label+'</span></div>';
+    h+='<span style="font-size:14px;font-weight:700;color:#c0392b">'+fmt(catTotal)+'</span>';
+    h+='</div>';
+  });
+  h+='</div>';
+
+  // 最近の経費
+  h+='<h2 class="section-title">最近の経費</h2>';
+  if(!expenses.length)h+='<div class="empty">経費を登録してください</div>';
+  expenses.slice(0,5).forEach(function(e){h+=expenseCard(e,true)});
+
+  document.getElementById('tab-dashboard').innerHTML=h;
+}
+
+function expenseCard(e,compact){
+  const cat=getCat(e.category);
+  let h='<div class="card">';
+  h+='<div class="row-between">';
+  h+='<div style="display:flex;align-items:center;gap:6px">';
+  h+='<span style="font-size:18px">'+cat.icon+'</span>';
+  h+='<span class="cat-badge">'+esc(cat.label)+'</span>';
+  if(e.is_recurring)h+='<span class="recurring-badge">毎月</span>';
+  h+='</div>';
+  h+='<span class="item-sub">'+esc(e.expense_date||'')+'</span>';
+  h+='</div>';
+  if(e.note)h+='<div class="item-name" style="margin-top:6px">'+esc(e.note)+'</div>';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">';
+  h+='<div style="font-size:20px;font-weight:700;color:#c0392b">'+fmt(e.amount)+'</div>';
+  if(!compact){
+    h+='<div style="display:flex;gap:6px">';
+    if(e.photo_url)h+='<button class="edit-btn" onclick="viewPhoto('+e.id+')">📷 領収書</button>';
+    h+='<button class="edit-btn" onclick="openEdit('+e.id+')">編集</button>';
+    h+='</div>';
+  }
+  h+='</div>';
+  h+='</div>';
+  return h;
+}
+
+function renderExpenses(){
+  let h='<div class="row-between"><h2 class="section-title">経費記録</h2><button class="add-btn" onclick="openAdd()">+ 追加</button></div>';
+  if(!expenses.length){h+='<div class="empty">経費を登録してください</div>';document.getElementById('tab-expenses').innerHTML=h;return;}
+
+  // 月別グループ
+  const months={};
+  expenses.forEach(function(e){
+    const m=(e.expense_date||'').slice(0,7)||'不明';
+    if(!months[m])months[m]=[];
+    months[m].push(e);
+  });
+
+  Object.keys(months).sort().reverse().forEach(function(m){
+    const total=months[m].reduce((s,e)=>s+(e.amount||0),0);
+    h+='<div class="month-header">'+m.replace('-','年')+'月　合計 '+fmt(total)+'</div>';
+    months[m].forEach(function(e){h+=expenseCard(e,false)});
+  });
+
+  document.getElementById('tab-expenses').innerHTML=h;
+}
+
+function showTab(tab,btn){
+  document.querySelectorAll('.nav-btn').forEach(function(b){b.classList.remove('active')});
+  if(btn)btn.classList.add('active');
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active')});
+  document.getElementById('tab-'+tab).classList.add('active');
+}
+
+function getCatOpts(selected){
+  return CATS.map(function(c){
+    return '<option value="'+c.value+'"'+(c.value===selected?' selected':'')+'>'+c.icon+' '+c.label+'</option>';
+  }).join('');
+}
+
+function openAdd(){
+  document.getElementById('modal').innerHTML='<div class="modal-box">'+
+    '<button class="close-btn" onclick="closeModal()">&#x2715;</button>'+
+    '<div class="modal-title">💴 経費登録</div>'+
+    '<label class="field-label">カテゴリ *</label>'+
+    '<select class="field-input" id="f-cat">'+getCatOpts('rent')+'</select>'+
+    '<label class="field-label">金額(円) *</label>'+
+    '<input class="field-input" id="f-amount" type="number" placeholder="例: 50000">'+
+    '<label class="field-label">日付 *</label>'+
+    '<input class="field-input" id="f-date" type="date" value="'+today()+'">'+
+    '<label class="field-label">メモ</label>'+
+    '<input class="field-input" id="f-note" placeholder="例: 6月分家賃">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-top:14px">'+
+    '<input type="checkbox" id="f-recurring" style="width:18px;height:18px">'+
+    '<label for="f-recurring" style="font-size:13px;color:#555">毎月の固定費</label>'+
+    '</div>'+
+    '<label class="field-label">領収書写真</label>'+
+    '<div class="photo-upload" id="photo-upload-area">&#128247; 領収書を撮影・選択</div>'+
+    '<input type="file" id="f-photo" accept="image/*" capture="environment" style="display:none" onchange="previewPhoto(this)">'+
+    '<img id="photo-preview" class="photo-preview">'+
+    '<button class="save-btn" onclick="saveExpense(null)">登録する</button>'+
+    '</div>';
+  document.getElementById('modal').classList.add('show');
+  document.getElementById('photo-upload-area').onclick=function(){document.getElementById('f-photo').click()};
+}
+
+function openEdit(id){
+  const e=expenses.find(function(x){return x.id===id});
+  if(!e)return;
+  document.getElementById('modal').innerHTML='<div class="modal-box">'+
+    '<button class="close-btn" onclick="closeModal()">&#x2715;</button>'+
+    '<div class="modal-title">💴 経費編集</div>'+
+    (e.photo_url?'<img src="'+esc(e.photo_url)+'" style="width:100%;height:150px;object-fit:cover;border-radius:10px;margin-bottom:10px">':'')+
+    '<label class="field-label">カテゴリ *</label>'+
+    '<select class="field-input" id="f-cat">'+getCatOpts(e.category)+'</select>'+
+    '<label class="field-label">金額(円) *</label>'+
+    '<input class="field-input" id="f-amount" type="number" value="'+e.amount+'">'+
+    '<label class="field-label">日付 *</label>'+
+    '<input class="field-input" id="f-date" type="date" value="'+esc(e.expense_date||today())+'">'+
+    '<label class="field-label">メモ</label>'+
+    '<input class="field-input" id="f-note" value="'+esc(e.note||'')+'">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-top:14px">'+
+    '<input type="checkbox" id="f-recurring" style="width:18px;height:18px"'+(e.is_recurring?' checked':'')+'>'+
+    '<label for="f-recurring" style="font-size:13px;color:#555">毎月の固定費</label>'+
+    '</div>'+
+    '<label class="field-label">領収書写真を変更</label>'+
+    '<div class="photo-upload" id="photo-upload-area">&#128247; 領収書を撮影・選択</div>'+
+    '<input type="file" id="f-photo" accept="image/*" capture="environment" style="display:none" onchange="previewPhoto(this)">'+
+    '<img id="photo-preview" class="photo-preview">'+
+    '<button class="save-btn" onclick="saveExpense('+id+')">保存する</button>'+
+    '</div>';
+  document.getElementById('modal').classList.add('show');
+  document.getElementById('photo-upload-area').onclick=function(){document.getElementById('f-photo').click()};
+}
+
+function viewPhoto(id){
+  const e=expenses.find(function(x){return x.id===id});
+  if(!e||!e.photo_url)return;
+  document.getElementById('modal').innerHTML='<div class="modal-box">'+
+    '<button class="close-btn" onclick="closeModal()">&#x2715;</button>'+
+    '<div class="modal-title">📷 領収書</div>'+
+    '<img src="'+esc(e.photo_url)+'" style="width:100%;border-radius:10px;margin-top:8px">'+
+    '</div>';
+  document.getElementById('modal').classList.add('show');
+}
+
+function previewPhoto(input){
+  if(input.files&&input.files[0]){
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      var img=document.getElementById('photo-preview');
+      img.src=ev.target.result;
+      img.style.display='block';
+    };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+async function saveExpense(id){
+  var amount=+document.getElementById('f-amount').value;
+  if(!amount)return alert('金額を入力してください');
+  var photo_url=id?(expenses.find(function(e){return e.id===id})||{}).photo_url:null;
+  var photoFile=document.getElementById('f-photo').files[0];
+  if(photoFile){var url=await uploadPhoto(photoFile);if(url)photo_url=url;}
+  var row={
+    category:document.getElementById('f-cat').value,
+    amount:amount,
+    expense_date:document.getElementById('f-date').value,
+    note:document.getElementById('f-note').value,
+    is_recurring:document.getElementById('f-recurring').checked,
+    photo_url:photo_url
+  };
+  if(id)await sbFetch('expenses?id=eq.'+id,{method:'PATCH',body:JSON.stringify(row)});
+  else await sbFetch('expenses',{method:'POST',body:JSON.stringify(row)});
+  await load();
+  closeModal();
+}
+
+function closeModal(){
+  document.getElementById('modal').classList.remove('show');
+  document.getElementById('modal').innerHTML='';
+}
+
+load();
+</script>
+</body>
+</html>
