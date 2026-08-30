@@ -8,7 +8,8 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js'
-import { fmt, thisMonth, downloadCsv, today } from '../lib/format'
+import { fmt, thisMonth, downloadCsv, today, daysSince } from '../lib/format'
+import { conditionLabel, AGING_DANGER_DAYS } from '../lib/constants'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
@@ -29,10 +30,14 @@ function netProfit(sale, items) {
 
 function exportItemsCsv(items) {
   const rows = [
-    ['管理コード', '名前', 'カテゴリ', '仕入元', '仕入値', '売値', 'ステータス', 'メモ', '登録日'],
+    ['管理コード', '名前', 'カテゴリ', '仕入元', '仕入値', '売値', 'ステータス', '仕入日付', '滞留日数', '保存場所', 'ロット番号', '状態', '想定販売期限', 'メモ', '登録日'],
     ...items.map((i) => [
       i.code, i.name, i.category, i.source_place, i.buy_price, i.sell_price,
-      i.status === 'in_stock' ? '在庫中' : '売済み', i.note || '', (i.created_at || '').slice(0, 10),
+      i.status === 'in_stock' ? '在庫中' : '売済み',
+      i.purchase_date || '',
+      i.status === 'in_stock' ? (daysSince(i.purchase_date || i.created_at) ?? '') : '',
+      i.storage_location || '', i.lot_number || '', conditionLabel(i.condition), i.expected_sell_by || '',
+      i.note || '', (i.created_at || '').slice(0, 10),
     ]),
   ]
   downloadCsv(`mingay-items-${today()}.csv`, rows)
@@ -57,6 +62,7 @@ function exportSalesCsv(sales, items, customers) {
 export default function Dashboard({ items, sales, purchases, expenses, customers }) {
   const inStock = items.filter((i) => i.status === 'in_stock')
   const soldItems = items.filter((i) => i.status === 'sold')
+  const staleCount = inStock.filter((i) => (daysSince(i.purchase_date || i.created_at) ?? 0) >= AGING_DANGER_DAYS).length
   const totalSell = sales.reduce((s, x) => s + (x.sell_price || 0), 0)
   const totalNet = sales.reduce((s, x) => s + netProfit(x, items), 0)
   const cm = thisMonth()
@@ -100,6 +106,7 @@ export default function Dashboard({ items, sales, purchases, expenses, customers
       <div className="card-grid" style={{ marginTop: 10 }}>
         <Kpi label="今月の経費" value={fmt(totalMonthExpense)} color="#c0392b" />
         <Kpi label="仕入回数" value={`${purchases.length}回`} color="#e67e22" />
+        <Kpi label={`長期滞留(${AGING_DANGER_DAYS}日+)`} value={`${staleCount}点`} color="#c0392b" />
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 12, marginBottom: 4 }}>

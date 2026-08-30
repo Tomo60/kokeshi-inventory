@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase, uploadPhoto } from '../lib/supabase'
 import { fmt, today } from '../lib/format'
+import { CONDITIONS } from '../lib/constants'
 import Modal from './Modal'
 
 const SOURCE_TYPES = [
@@ -13,7 +14,11 @@ const SOURCE_TYPES = [
 ]
 
 const emptyForm = { source_type: 'market', source: '', purchase_date: today(), total_amount: '', quantity: '', note: '' }
-const emptyItemForm = { category: '', source_place: '', name: '', buy_price: '', sell_price: '', note: '' }
+const emptyItemForm = {
+  category: '', source_place: '', name: '', buy_price: '', sell_price: '',
+  purchase_date: today(), storage_location: '', lot_number: '', condition: '', expected_sell_by: '',
+  note: '',
+}
 
 function avgOf(form) {
   const total = +form.total_amount || 0
@@ -86,7 +91,7 @@ export default function Purchases({ purchases, reload }) {
 
   function openLink(p) {
     setLinking(p)
-    setItemForm({ ...emptyItemForm, buy_price: p.avg_amount })
+    setItemForm({ ...emptyItemForm, buy_price: p.avg_amount, purchase_date: p.purchase_date || today() })
     setItemPhotoFile(null)
     setItemPhotoPreview(null)
   }
@@ -110,6 +115,11 @@ export default function Purchases({ purchases, reload }) {
       source_place: itemForm.source_place || null,
       buy_price: itemForm.buy_price ? +itemForm.buy_price : null,
       sell_price: itemForm.sell_price ? +itemForm.sell_price : null,
+      purchase_date: itemForm.purchase_date || null,
+      storage_location: itemForm.storage_location || null,
+      lot_number: itemForm.lot_number || null,
+      condition: itemForm.condition || null,
+      expected_sell_by: itemForm.expected_sell_by || null,
       note: itemForm.note || null,
       photo_url,
       status: 'in_stock',
@@ -204,6 +214,19 @@ export default function Purchases({ purchases, reload }) {
           <input className="field-input" type="number" value={itemForm.buy_price} onChange={(e) => setItemForm({ ...itemForm, buy_price: e.target.value })} />
           <label className="field-label">売値(円)</label>
           <input className="field-input" type="number" value={itemForm.sell_price} onChange={(e) => setItemForm({ ...itemForm, sell_price: e.target.value })} placeholder="例: 5000" />
+          <label className="field-label">仕入日付（仕入記録の日付が自動入力）</label>
+          <input className="field-input" type="date" value={itemForm.purchase_date || ''} onChange={(e) => setItemForm({ ...itemForm, purchase_date: e.target.value })} />
+          <label className="field-label">保存場所（棚番号・保管場所）</label>
+          <input className="field-input" value={itemForm.storage_location} onChange={(e) => setItemForm({ ...itemForm, storage_location: e.target.value })} placeholder="例: A棚-3 / 倉庫2F" />
+          <label className="field-label">ロット番号</label>
+          <input className="field-input" value={itemForm.lot_number} onChange={(e) => setItemForm({ ...itemForm, lot_number: e.target.value })} />
+          <label className="field-label">状態・コンディション</label>
+          <select className="field-input" value={itemForm.condition} onChange={(e) => setItemForm({ ...itemForm, condition: e.target.value })}>
+            <option value="">未設定</option>
+            {CONDITIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+          <label className="field-label">想定販売期限</label>
+          <input className="field-input" type="date" value={itemForm.expected_sell_by || ''} onChange={(e) => setItemForm({ ...itemForm, expected_sell_by: e.target.value })} />
           <label className="field-label">メモ</label>
           <input className="field-input" value={itemForm.note} onChange={(e) => setItemForm({ ...itemForm, note: e.target.value })} />
           <label className="field-label">写真</label>

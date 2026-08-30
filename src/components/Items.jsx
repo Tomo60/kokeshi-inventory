@@ -1,13 +1,25 @@
 import { useState } from 'react'
 import QRCode from 'qrcode'
 import { supabase, uploadPhoto } from '../lib/supabase'
-import { fmt } from '../lib/format'
+import { fmt, today, daysSince } from '../lib/format'
+import { CONDITIONS, conditionLabel, agingLevel } from '../lib/constants'
 import Modal from './Modal'
 
-const emptyForm = { code: '', name: '', category: '', source_place: '', buy_price: '', sell_price: '', note: '' }
+const emptyForm = {
+  code: '', name: '', category: '', source_place: '',
+  buy_price: '', sell_price: '',
+  purchase_date: today(), storage_location: '', lot_number: '', condition: '', expected_sell_by: '',
+  note: '',
+}
+
+function itemAgingDays(item) {
+  return daysSince(item.purchase_date || item.created_at)
+}
 
 function ItemCard({ item, onEdit, onSell, onReturn, onQr }) {
   const sold = item.status === 'sold'
+  const agingDays = !sold ? itemAgingDays(item) : null
+  const level = agingLevel(agingDays)
   return (
     <div className="card" style={{ padding: '10px 12px' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -17,15 +29,23 @@ function ItemCard({ item, onEdit, onSell, onReturn, onQr }) {
           <div style={{ width: 60, height: 60, borderRadius: 8, background: '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: '1px dashed #ddd', fontSize: 20 }}>📷</div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, flexWrap: 'wrap' }}>
             <span className={'status-badge ' + (sold ? 'status-sold' : 'status-in')}>{sold ? '売済み' : '在庫中'}</span>
             {item.code && <span className="code-badge">{item.code}</span>}
+            {level && <span className={'aging-badge aging-' + level}>滞留 {agingDays}日</span>}
           </div>
           <div className="item-name">{item.name}</div>
           <div className="price-row">
             {item.sell_price ? <span className="price-tag">売値 {fmt(item.sell_price)}</span> : null}
             {item.buy_price ? <span className="price-tag">仕入 {fmt(item.buy_price)}</span> : null}
           </div>
+          {(item.storage_location || item.condition || item.lot_number) && (
+            <div className="item-sub" style={{ marginTop: 2 }}>
+              {item.storage_location && <>📍 {item.storage_location}　</>}
+              {item.condition && <>状態: {conditionLabel(item.condition)}　</>}
+              {item.lot_number && <>Lot: {item.lot_number}</>}
+            </div>
+          )}
         </div>
       </div>
       <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
@@ -40,6 +60,7 @@ function ItemCard({ item, onEdit, onSell, onReturn, onQr }) {
 
 export default function Items({ items, reload }) {
   const [filter, setFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('recent')
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -61,6 +82,9 @@ export default function Items({ items, reload }) {
     }
     return true
   })
+  const sorted = sortBy === 'aging'
+    ? [...filtered].sort((a, b) => (itemAgingDays(b) ?? -1) - (itemAgingDays(a) ?? -1))
+    : filtered
 
   function openAdd() {
     setEditing(null)
@@ -99,6 +123,11 @@ export default function Items({ items, reload }) {
       source_place: form.source_place || null,
       buy_price: form.buy_price ? +form.buy_price : null,
       sell_price: form.sell_price ? +form.sell_price : null,
+      purchase_date: form.purchase_date || null,
+      storage_location: form.storage_location || null,
+      lot_number: form.lot_number || null,
+      condition: form.condition || null,
+      expected_sell_by: form.expected_sell_by || null,
       note: form.note || null,
       photo_url,
     }
@@ -160,8 +189,12 @@ export default function Items({ items, reload }) {
         <button className={'filter-btn' + (filter === 'in_stock' ? ' active' : '')} onClick={() => setFilter('in_stock')}>在庫中({inCount})</button>
         <button className={'filter-btn' + (filter === 'sold' ? ' active' : '')} onClick={() => setFilter('sold')}>売済み({soldCount})</button>
       </div>
-      {filtered.length === 0 && <div className="empty">該当する商品がありません</div>}
-      {filtered.map((item) => (
+      <div className="filter-row">
+        <button className={'filter-btn' + (sortBy === 'recent' ? ' active' : '')} onClick={() => setSortBy('recent')}>登録が新しい順</button>
+        <button className={'filter-btn' + (sortBy === 'aging' ? ' active' : '')} onClick={() => setSortBy('aging')}>滞留が長い順</button>
+      </div>
+      {sorted.length === 0 && <div className="empty">該当する商品がありません</div>}
+      {sorted.map((item) => (
         <ItemCard
           key={item.id}
           item={item}
@@ -185,10 +218,29 @@ export default function Items({ items, reload }) {
           <input className="field-input" value={form.category || ''} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="例: 木工品" />
           <label className="field-label">仕入元・産地</label>
           <input className="field-input" value={form.source_place || ''} onChange={(e) => setForm({ ...form, source_place: e.target.value })} placeholder="例: 岩手" />
+          <label className="field-label">仕入日付</label>
+          <input className="field-input" type="date" value={form.purchase_date || ''} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} />
+          {editing && (
+            <div className="calc-box">
+              <div className="item-sub">滞留期間（仕入日から現在まで）</div>
+              <div className="calc-result">{itemAgingDays(editing) ?? '-'}日</div>
+            </div>
+          )}
           <label className="field-label">仕入値(円)</label>
           <input className="field-input" type="number" value={form.buy_price || ''} onChange={(e) => setForm({ ...form, buy_price: e.target.value })} />
           <label className="field-label">売値(円)</label>
           <input className="field-input" type="number" value={form.sell_price || ''} onChange={(e) => setForm({ ...form, sell_price: e.target.value })} />
+          <label className="field-label">保存場所（棚番号・保管場所）</label>
+          <input className="field-input" value={form.storage_location || ''} onChange={(e) => setForm({ ...form, storage_location: e.target.value })} placeholder="例: A棚-3 / 倉庫2F" />
+          <label className="field-label">ロット番号</label>
+          <input className="field-input" value={form.lot_number || ''} onChange={(e) => setForm({ ...form, lot_number: e.target.value })} />
+          <label className="field-label">状態・コンディション</label>
+          <select className="field-input" value={form.condition || ''} onChange={(e) => setForm({ ...form, condition: e.target.value })}>
+            <option value="">未設定</option>
+            {CONDITIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+          <label className="field-label">想定販売期限</label>
+          <input className="field-input" type="date" value={form.expected_sell_by || ''} onChange={(e) => setForm({ ...form, expected_sell_by: e.target.value })} />
           <label className="field-label">メモ</label>
           <input className="field-input" value={form.note || ''} onChange={(e) => setForm({ ...form, note: e.target.value })} />
           <label className="field-label">写真</label>
