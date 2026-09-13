@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase, isConfigured } from './lib/supabase'
+import { generateRecurringExpenses } from './lib/recurringExpenses'
 import Dashboard from './components/Dashboard'
 import Items from './components/Items'
 import Sales from './components/Sales'
@@ -23,25 +24,30 @@ export default function App() {
   const [purchases, setPurchases] = useState([])
   const [customers, setCustomers] = useState([])
   const [expenses, setExpenses] = useState([])
+  const [recurring, setRecurring] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
 
   const reload = useCallback(async () => {
     try {
-      const [i, s, p, c, e] = await Promise.all([
+      const [i, s, p, c, e, r] = await Promise.all([
         supabase.from('items').select('*').order('created_at', { ascending: false }),
         supabase.from('sales').select('*').order('sold_at', { ascending: false }),
         supabase.from('purchases').select('*').order('created_at', { ascending: false }),
         supabase.from('customers').select('*').order('created_at', { ascending: false }),
         supabase.from('expenses').select('*').order('expense_date', { ascending: false }),
+        supabase.from('recurring_expenses').select('*').order('day_of_month', { ascending: true }),
       ])
-      const firstError = [i, s, p, c, e].find((r) => r.error)?.error
+      const firstError = [i, s, p, c, e].find((x) => x.error)?.error
       if (firstError) throw firstError
       setItems(i.data || [])
       setSales(s.data || [])
       setPurchases(p.data || [])
       setCustomers(c.data || [])
       setExpenses(e.data || [])
+      // 定期経費テーブルは後から追加したもの。マイグレーション未適用でもアプリ本体は動かす。
+      if (r.error) console.warn('定期経費テンプレートを取得できませんでした:', r.error.message)
+      setRecurring(r.error ? [] : r.data || [])
       setLoadError(null)
     } catch (err) {
       setLoadError(err.message || String(err))
@@ -51,11 +57,16 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (isConfigured) reload()
-    else setLoading(false)
+    if (!isConfigured) {
+      setLoading(false)
+      return
+    }
+    // 起動時に、計上日を過ぎた当月分の定期経費を実績へ自動計上してから読み込む。
+    // 失敗してもアプリは通常どおり使えるよう、generateRecurringExpenses 側で例外は握り潰している。
+    generateRecurringExpenses().then(() => reload())
   }, [reload])
 
-  const shared = { items, sales, purchases, customers, expenses, reload }
+  const shared = { items, sales, purchases, customers, expenses, recurring, reload }
 
   return (
     <>
