@@ -5,7 +5,7 @@ import Modal from './Modal'
 
 const CATS = [
   { value: 'rent', label: '家賃', icon: '🏠' },
-  { value: 'materials', label: '資材・梱包材', icon: '📦' },
+  { value: 'materials', label: '梱包材料費', icon: '📦' },
   { value: 'shipping', label: '送料', icon: '🚚' },
   { value: 'platform', label: '手数料', icon: '💳' },
   { value: 'equipment', label: '備品', icon: '🛠️' },
