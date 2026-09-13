@@ -75,11 +75,37 @@ create table if not exists expenses (
   category text not null,
   amount numeric not null,
   expense_date date not null default current_date,
+  payee text, -- 支払先
+  payment_method text, -- 支払方法
   note text,
   is_recurring boolean not null default false,
   photo_url text,
   created_at timestamptz not null default now()
+  -- recurring_expense_id は recurring_expenses 作成後に下の alter table で追加する
 );
+
+-- 定期経費テンプレート（家賃など毎月同日に発生する固定費の定義）。
+-- 実績は expenses に自動生成され、このテーブルは「何を・いくら・毎月何日に計上するか」だけを保持する。
+create table if not exists recurring_expenses (
+  id bigint generated always as identity primary key,
+  category text not null,
+  amount numeric not null,
+  day_of_month integer not null check (day_of_month between 1 and 28), -- 全ての月に存在する日のみ許可
+  payee text,
+  payment_method text,
+  note text,
+  active boolean not null default true,
+  start_date date not null default current_date,
+  end_date date,
+  last_generated_month text, -- 'YYYY-MM'。重複生成の防止に使用
+  created_at timestamptz not null default now()
+);
+
+-- 定期経費まわりの expenses 側の列。新規・既存どちらのデータベースでもここで追加される
+-- （recurring_expense_id は上の recurring_expenses 作成後でないと外部キーを張れないため、この位置）。
+alter table expenses add column if not exists payee text;
+alter table expenses add column if not exists payment_method text;
+alter table expenses add column if not exists recurring_expense_id bigint references recurring_expenses(id) on delete set null;
 
 -- Row Level Security: disabled by default for personal single-user use with the anon key.
 -- Enable + add policies if you plan to expose this beyond a trusted personal device.
