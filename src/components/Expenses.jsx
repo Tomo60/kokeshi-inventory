@@ -4,6 +4,9 @@ import { fmt, today } from '../lib/format'
 import Modal from './Modal'
 import RecurringExpenses from './RecurringExpenses'
 
+// 分類ルール: 梱包材料（段ボール・緩衝材など）の購入費用は purchases（仕入）には計上せず、
+// ここの 'materials'（梱包材料費）として expenses にのみ記録する。
+// purchases は「販売する商品そのものの仕入」専用。両方に入れると二重計上になるので注意。
 export const CATS = [
   { value: 'rent', label: '家賃', icon: '🏠' },
   { value: 'materials', label: '梱包材料費', icon: '📦' },

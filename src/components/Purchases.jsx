@@ -4,6 +4,9 @@ import { fmt, today } from '../lib/format'
 import { CONDITIONS } from '../lib/constants'
 import Modal from './Modal'
 
+// 分類ルール: このテーブルは「販売する商品そのものの仕入」専用。
+// 梱包材料（段ボール・緩衝材など）の購入費用はここには計上せず、
+// expenses のカテゴリ 'materials'（梱包材料費）にのみ記録する。両方に入れると二重計上になる。
 const SOURCE_TYPES = [
   { value: 'market', label: 'フリーマーケット' },
   { value: 'online', label: 'ネット通販/オークション' },
