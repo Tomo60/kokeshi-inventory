@@ -107,5 +107,10 @@ alter table expenses add column if not exists payee text;
 alter table expenses add column if not exists payment_method text;
 alter table expenses add column if not exists recurring_expense_id bigint references recurring_expenses(id) on delete set null;
 
+-- データマイグレーション: 経費「手数料」カテゴリの内部値を 'platform' から 'platform_fee' へ改名。
+-- sales テーブルの platform 列（販売チャネル区分）との名称衝突を避けるための変更で、表示ラベルは「手数料」のまま。
+-- 対象行が無ければ何も起きないため、何度実行しても安全（冪等）。
+update expenses set category = 'platform_fee' where category = 'platform';
+
 -- Row Level Security: disabled by default for personal single-user use with the anon key.
 -- Enable + add policies if you plan to expose this beyond a trusted personal device.
