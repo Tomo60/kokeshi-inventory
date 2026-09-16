@@ -107,6 +107,25 @@ alter table expenses add column if not exists payee text;
 alter table expenses add column if not exists payment_method text;
 alter table expenses add column if not exists recurring_expense_id bigint references recurring_expenses(id) on delete set null;
 
+-- 売上の多販路・複数アカウント対応（Phase 1）。
+-- 既存の fee_rate / ad_rate（率）は後方互換のため残し、入力UIは fee_amount / ad_amount（実額）を主とする。
+alter table sales add column if not exists platform text not null default 'mercari'; -- 'mercari' | 'mercari_shops' | 'base' | 'yahoo_auction' | 'store' | 'other'
+alter table sales add column if not exists channel_account text; -- 販路内のアカウント（メルカリの複数アカウントのどれか）
+alter table sales add column if not exists external_order_no text; -- 取引ID等。API連携が無いため任意入力
+alter table sales add column if not exists fee_amount numeric; -- 手数料(実額)
+alter table sales add column if not exists ad_amount numeric; -- 広告費(実額)
+alter table sales add column if not exists payout_amount numeric; -- 実際の振込額
+alter table sales add column if not exists payout_date date; -- 入金日(わかれば)
+alter table sales add column if not exists sale_status text not null default 'completed'; -- 'completed' | 'returned' | 'cancelled' | 'discounted'
+alter table sales add column if not exists needs_review boolean not null default false; -- channel_account 等が未確定な過去分のフラグ
+
+-- 既存データの初期化（移行時の1回のみ）。
+-- 移行日より前に作られた行だけを対象にすることで、この schema.sql を後から再実行しても
+-- 移行後に入力された行には影響しないようにしている。
+-- ただし、移行前の行について確認済みとして needs_review を外した場合、再実行すると再度フラグが付く点に注意。
+update sales set platform = 'mercari' where platform is null;
+update sales set needs_review = true where channel_account is null and created_at < '2026-09-17';
+
 -- データマイグレーション: 経費「手数料」カテゴリの内部値を 'platform' から 'platform_fee' へ改名。
 -- sales テーブルの platform 列（販売チャネル区分）との名称衝突を避けるための変更で、表示ラベルは「手数料」のまま。
 -- 対象行が無ければ何も起きないため、何度実行しても安全（冪等）。

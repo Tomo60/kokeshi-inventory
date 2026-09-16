@@ -9,7 +9,7 @@ import {
   Legend,
 } from 'chart.js'
 import { fmt, thisMonth, downloadCsv, today, daysSince } from '../lib/format'
-import { conditionLabel, AGING_DANGER_DAYS } from '../lib/constants'
+import { conditionLabel, AGING_DANGER_DAYS, isCountedSale, platformLabel, saleStatusLabel } from '../lib/constants'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
@@ -45,14 +45,20 @@ function exportItemsCsv(items) {
 
 function exportSalesCsv(sales, items, customers) {
   const rows = [
-    ['管理コード', '商品名', '顧客名', '販売価格', '仕入値', '手数料率', '広告費率', '送料', '純利益', '販売日', 'メモ'],
+    ['管理コード', '商品名', '顧客名', '販路', 'アカウント', '取引ID', 'ステータス', '集計対象',
+      '販売価格', '仕入値', '手数料率', '広告費率', '手数料実額', '広告費実額', '送料', '純利益',
+      '入金額', '入金日', '成約日', '要確認', 'メモ'],
     ...sales.map((s) => {
       const item = items.find((i) => i.id === s.item_id) || {}
       const customer = customers.find((c) => c.id === s.customer_id) || {}
       return [
-        item.code || '', item.name || s.note || '不明', customer.name || '', s.sell_price,
-        item.buy_price || 0, s.fee_rate || 0, s.ad_rate || 0, s.shipping_fee || 0,
-        netProfit(s, items), s.sold_at || '', s.note || '',
+        item.code || '', item.name || s.note || '不明', customer.name || '',
+        platformLabel(s.platform || 'mercari'), s.channel_account || '', s.external_order_no || '',
+        saleStatusLabel(s.sale_status || 'completed'), isCountedSale(s) ? '対象' : '対象外',
+        s.sell_price, item.buy_price || 0, s.fee_rate || 0, s.ad_rate || 0,
+        s.fee_amount ?? '', s.ad_amount ?? '', s.shipping_fee || 0, netProfit(s, items),
+        s.payout_amount ?? '', s.payout_date || '', s.sold_at || '', s.needs_review ? '要確認' : '',
+        s.note || '',
       ]
     }),
   ]
@@ -63,14 +69,16 @@ export default function Dashboard({ items, sales, purchases, expenses, customers
   const inStock = items.filter((i) => i.status === 'in_stock')
   const soldItems = items.filter((i) => i.status === 'sold')
   const staleCount = inStock.filter((i) => (daysSince(i.purchase_date || i.created_at) ?? 0) >= AGING_DANGER_DAYS).length
-  const totalSell = sales.reduce((s, x) => s + (x.sell_price || 0), 0)
-  const totalNet = sales.reduce((s, x) => s + netProfit(x, items), 0)
+  // 返品・キャンセルは売上・利益の集計に含めない
+  const countedSales = sales.filter(isCountedSale)
+  const totalSell = countedSales.reduce((s, x) => s + (x.sell_price || 0), 0)
+  const totalNet = countedSales.reduce((s, x) => s + netProfit(x, items), 0)
   const cm = thisMonth()
   const monthExpenses = expenses.filter((e) => (e.expense_date || '').startsWith(cm))
   const totalMonthExpense = monthExpenses.reduce((s, e) => s + (e.amount || 0), 0)
 
   const monthly = {}
-  sales.forEach((s) => {
+  countedSales.forEach((s) => {
     const m = (s.sold_at || '').slice(0, 7)
     if (!m) return
     if (!monthly[m]) monthly[m] = { revenue: 0, net: 0 }
