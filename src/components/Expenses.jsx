@@ -11,11 +11,24 @@ export const CATS = [
   { value: 'rent', label: '家賃', icon: '🏠' },
   { value: 'materials', label: '梱包材料費', icon: '📦' },
   { value: 'shipping', label: '送料', icon: '🚚' },
-  { value: 'platform', label: '手数料', icon: '💳' },
+  // 'platform_fee' は経費（手数料）カテゴリの内部値。
+  // sales テーブルの platform 列（メルカリ等の販売チャネル区分）とは無関係な別物。
+  { value: 'platform_fee', label: '手数料', icon: '💳' },
   { value: 'equipment', label: '備品', icon: '🛠️' },
   { value: 'other', label: 'その他', icon: '📝' },
 ]
-function getCat(v) { return CATS.find((c) => c.value === v) || { label: v || 'その他', icon: '📝' } }
+
+// 旧内部値 → 新内部値の互換マップ。
+// コードのデプロイとデータマイグレーション(schema.sql の update 文)は同時に反映できないため、
+// 旧値のまま残っている行も正しいカテゴリとして表示・集計できるようにしている。
+// 本番DBで update を適用し、旧値の行が 0 件になったことを確認できたら、このマップは削除してよい。
+const LEGACY_CATEGORY_ALIASES = { platform: 'platform_fee' }
+export const normalizeCategory = (v) => LEGACY_CATEGORY_ALIASES[v] || v
+
+function getCat(v) {
+  const key = normalizeCategory(v)
+  return CATS.find((c) => c.value === key) || { label: key || 'その他', icon: '📝' }
+}
 
 const emptyForm = { category: 'rent', amount: '', expense_date: today(), payee: '', payment_method: '', note: '', is_recurring: false }
 
@@ -90,7 +103,7 @@ export default function Expenses({ expenses, recurring, reload }) {
       </div>
       <div className="card">
         {CATS.map((cat) => {
-          const total = expenses.filter((e) => e.category === cat.value).reduce((s, e) => s + (e.amount || 0), 0)
+          const total = expenses.filter((e) => normalizeCategory(e.category) === cat.value).reduce((s, e) => s + (e.amount || 0), 0)
           if (!total) return null
           return (
             <div key={cat.value} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f5f5f5' }}>
