@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { fmt } from '../lib/format'
+import { isCountedSale } from '../lib/constants'
 import Modal from './Modal'
 
 const emptyForm = { name: '', contact: '', note: '' }
@@ -33,7 +34,8 @@ export default function Customers({ customers, sales, items, reload }) {
       </div>
       {customers.length === 0 && <div className="empty">顧客を登録してください</div>}
       {customers.map((c) => {
-        const cSales = sales.filter((s) => s.customer_id === c.id)
+        // 返品・キャンセルは購入実績に含めない
+        const cSales = sales.filter((s) => s.customer_id === c.id && isCountedSale(s))
         const total = cSales.reduce((s, x) => s + (x.sell_price || 0), 0)
         return (
           <div className="card" key={c.id}>
