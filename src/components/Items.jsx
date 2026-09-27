@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import QRCode from 'qrcode'
 import { supabase, uploadPhoto } from '../lib/supabase'
+import { saveWithRetry } from '../lib/retry'
 import { fmt, today, daysSince } from '../lib/format'
 import { CONDITIONS, conditionLabel, agingLevel } from '../lib/constants'
 import Modal from './Modal'
@@ -108,8 +109,12 @@ export default function Items({ items, reload }) {
     reader.readAsDataURL(file)
   }
 
+  // 保存できたかを返す。失敗時に呼び出し側がフォームを閉じないようにするため。
   async function save() {
-    if (!form.name) return alert('商品名を入力してください')
+    if (!form.name) {
+      alert('商品名を入力してください')
+      return false
+    }
     setSaving(true)
     let photo_url = editing ? editing.photo_url : null
     if (photoFile) {
@@ -131,19 +136,28 @@ export default function Items({ items, reload }) {
       note: form.note || null,
       photo_url,
     }
-    if (editing) {
-      await supabase.from('items').update(row).eq('id', editing.id)
-    } else {
-      await supabase.from('items').insert({ ...row, status: 'in_stock' })
-    }
+    // 一時的な通信失敗は自動で再試行し、最終的に失敗したら理由を表示して
+    // 入力内容を残す（以前は失敗しても無言でフォームが閉じ、保存できたように見えていた）。
+    const { ok } = await saveWithRetry(
+      () => (editing
+        ? supabase.from('items').update(row).eq('id', editing.id)
+        : supabase.from('items').insert({ ...row, status: 'in_stock' })),
+      '商品の保存',
+    )
     setSaving(false)
+    if (!ok) return false
     setEditing(null)
     setForm(emptyForm)
     await reload()
+    return true
   }
 
   async function setStatus(item, status) {
-    await supabase.from('items').update({ status }).eq('id', item.id)
+    const { ok } = await saveWithRetry(
+      () => supabase.from('items').update({ status }).eq('id', item.id),
+      status === 'sold' ? '売済みへの変更' : '在庫へ戻す処理',
+    )
+    if (!ok) return
     await reload()
   }
 
@@ -246,7 +260,7 @@ export default function Items({ items, reload }) {
           <label className="field-label">写真</label>
           <div className="photo-upload" onClick={() => document.getElementById('item-photo-input').click()}>📷 タップして写真を選択</div>
           <input id="item-photo-input" type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={onPhotoChange} />
-          <button className="save-btn" disabled={saving} onClick={async () => { await save(); setFormOpen(false) }}>
+          <button className="save-btn" disabled={saving} onClick={async () => { if (await save()) setFormOpen(false) }}>
             {saving ? '保存中...' : editing ? '保存する' : '登録する'}
           </button>
         </Modal>

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
 import { monthKeyOf } from '../lib/recurringExpenses'
 import Modal from './Modal'
@@ -16,7 +17,7 @@ const emptyForm = {
   end_date: '',
 }
 
-export default function RecurringExpenses({ recurring, categories, reload }) {
+export default function RecurringExpenses({ recurring, recurringError, categories, reload }) {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -59,19 +60,41 @@ export default function RecurringExpenses({ recurring, categories, reload }) {
       start_date: form.start_date || today(),
       end_date: form.end_date || null,
     }
-    const { error } = editing
-      ? await supabase.from('recurring_expenses').update(row).eq('id', editing.id)
-      : await supabase.from('recurring_expenses').insert(row)
+    const { ok } = await saveWithRetry(
+      () => (editing
+        ? supabase.from('recurring_expenses').update(row).eq('id', editing.id)
+        : supabase.from('recurring_expenses').insert(row)),
+      '定期経費テンプレートの保存',
+    )
     setSaving(false)
-    if (error) return alert(`保存に失敗しました: ${error.message}`)
+    if (!ok) return
     setFormOpen(false)
     await reload()
   }
 
   async function toggleActive(r) {
-    const { error } = await supabase.from('recurring_expenses').update({ active: !r.active }).eq('id', r.id)
-    if (error) return alert(`更新に失敗しました: ${error.message}`)
+    const { ok } = await saveWithRetry(
+      () => supabase.from('recurring_expenses').update({ active: !r.active }).eq('id', r.id),
+      r.active ? '自動計上の停止' : '自動計上の再開',
+    )
+    if (!ok) return
     await reload()
+  }
+
+  // テーブルが読めないと「0件」と見分けがつかず、テーブル未作成やアクセス権の問題に
+  // 気づけないまま「登録しても増えない」ように見えるため、理由をはっきり出す。
+  if (recurringError) {
+    return (
+      <div className="card" style={{ marginTop: 14 }}>
+        <div className="section-title" style={{ marginTop: 0 }}>⚠️ 定期経費テンプレートを読み込めませんでした</div>
+        <div className="item-sub">{recurringError}</div>
+        <div className="item-sub" style={{ marginTop: 8 }}>
+          テーブル(<code>recurring_expenses</code>)が作成されていないか、アクセス権の設定が必要な可能性があります。
+          作成手順は <code>supabase/schema.sql</code> と README を参照してください。
+        </div>
+        <button className="add-btn" style={{ marginTop: 10 }} onClick={reload}>再読み込み</button>
+      </div>
+    )
   }
 
   return (

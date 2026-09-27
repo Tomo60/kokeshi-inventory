@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { withRetry } from './retry'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -18,9 +19,10 @@ export const PHOTO_BUCKET = 'mingay-photos'
 export async function uploadPhoto(file, prefix) {
   const ext = file.name.split('.').pop()
   const path = `${prefix}-${Date.now()}.${ext}`
-  const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
+  // 写真は本体データより重いので、回線が不安定なときほど失敗しやすい。読み書きと同じく再試行する。
+  const { error } = await withRetry(() => supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
     contentType: file.type,
-  })
+  }))
   if (error) {
     console.error(error)
     return null

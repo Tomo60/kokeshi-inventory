@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase, isConfigured } from './lib/supabase'
+import { withRetry, describeError } from './lib/retry'
 import { generateRecurringExpenses } from './lib/recurringExpenses'
 import Dashboard from './components/Dashboard'
 import Items from './components/Items'
@@ -25,18 +26,29 @@ export default function App() {
   const [customers, setCustomers] = useState([])
   const [expenses, setExpenses] = useState([])
   const [recurring, setRecurring] = useState([])
+  // 定期経費テーブルだけ読めない場合の理由。
+  // 「0件」と区別できないと、テーブル未作成やアクセス権の問題に気づけないため保持する。
+  const [recurringError, setRecurringError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
+  // 一時的な接続失敗で再試行中かどうか。「読み込み中...」のままだと
+  // 固まったように見えるため、待っている理由を表示するために持つ。
+  const [reconnecting, setReconnecting] = useState(false)
 
   const reload = useCallback(async () => {
+    setReconnecting(false)
+    // 再試行が始まったら画面に知らせる。テーブルごとに独立して再試行するので、
+    // どれか1つでも再試行に入った時点で表示を切り替える。
+    const onRetry = () => setReconnecting(true)
+    const fetchTable = (build) => withRetry(build, { onRetry })
     try {
       const [i, s, p, c, e, r] = await Promise.all([
-        supabase.from('items').select('*').order('created_at', { ascending: false }),
-        supabase.from('sales').select('*').order('sold_at', { ascending: false }),
-        supabase.from('purchases').select('*').order('created_at', { ascending: false }),
-        supabase.from('customers').select('*').order('created_at', { ascending: false }),
-        supabase.from('expenses').select('*').order('expense_date', { ascending: false }),
-        supabase.from('recurring_expenses').select('*').order('day_of_month', { ascending: true }),
+        fetchTable(() => supabase.from('items').select('*').order('created_at', { ascending: false })),
+        fetchTable(() => supabase.from('sales').select('*').order('sold_at', { ascending: false })),
+        fetchTable(() => supabase.from('purchases').select('*').order('created_at', { ascending: false })),
+        fetchTable(() => supabase.from('customers').select('*').order('created_at', { ascending: false })),
+        fetchTable(() => supabase.from('expenses').select('*').order('expense_date', { ascending: false })),
+        fetchTable(() => supabase.from('recurring_expenses').select('*').order('day_of_month', { ascending: true })),
       ])
       const firstError = [i, s, p, c, e].find((x) => x.error)?.error
       if (firstError) throw firstError
@@ -48,10 +60,12 @@ export default function App() {
       // 定期経費テーブルは後から追加したもの。マイグレーション未適用でもアプリ本体は動かす。
       if (r.error) console.warn('定期経費テンプレートを取得できませんでした:', r.error.message)
       setRecurring(r.error ? [] : r.data || [])
+      setRecurringError(r.error ? describeError(r.error) : null)
       setLoadError(null)
     } catch (err) {
-      setLoadError(err.message || String(err))
+      setLoadError(describeError(err))
     } finally {
+      setReconnecting(false)
       setLoading(false)
     }
   }, [])
@@ -63,10 +77,12 @@ export default function App() {
     }
     // 起動時に、計上日を過ぎた当月分の定期経費を実績へ自動計上してから読み込む。
     // 失敗してもアプリは通常どおり使えるよう、generateRecurringExpenses 側で例外は握り潰している。
-    generateRecurringExpenses().then(() => reload())
+    // ここが起動後の最初のリクエストになるため、再試行に入ったら画面にも知らせる。
+    generateRecurringExpenses(undefined, undefined, { onRetry: () => setReconnecting(true) })
+      .then(() => reload())
   }, [reload])
 
-  const shared = { items, sales, purchases, customers, expenses, recurring, reload }
+  const shared = { items, sales, purchases, customers, expenses, recurring, recurringError, reload }
 
   return (
     <>
@@ -87,7 +103,9 @@ export default function App() {
             </div>
           </div>
         ) : loading ? (
-          <div className="empty">読み込み中...</div>
+          <div className="empty">
+            {reconnecting ? 'サーバーへの接続を再試行しています...' : '読み込み中...'}
+          </div>
         ) : loadError ? (
           <div className="card" style={{ marginTop: 14 }}>
             <div className="section-title" style={{ marginTop: 0 }}>⚠️ データの読み込みに失敗しました</div>

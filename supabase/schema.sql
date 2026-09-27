@@ -133,3 +133,11 @@ update expenses set category = 'platform_fee' where category = 'platform';
 
 -- Row Level Security: disabled by default for personal single-user use with the anon key.
 -- Enable + add policies if you plan to expose this beyond a trusted personal device.
+--
+-- 注意: RLSを有効にしただけでポリシーを作らないと、anon key からは
+-- 読み取りも書き込みも一切できなくなる（全件拒否）。
+-- Supabase のダッシュボードの Table Editor からテーブルを作ると RLS が既定で有効になるため、
+-- このファイルを SQL Editor で実行せずに手作業でテーブルを追加すると、
+-- そのテーブルだけアプリから見えない（= 常に0件・保存できない）状態になる。
+-- 確認: select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r';
+-- 個人利用のまま揃えるなら: alter table <table> disable row level security;
