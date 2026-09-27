@@ -141,3 +141,9 @@ update expenses set category = 'platform_fee' where category = 'platform';
 -- そのテーブルだけアプリから見えない（= 常に0件・保存できない）状態になる。
 -- 確認: select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r';
 -- 個人利用のまま揃えるなら: alter table <table> disable row level security;
+
+-- 実際に起きた事例の修正（2026-09-27 に本番へ適用済み）:
+-- recurring_expenses だけ RLS が有効でポリシーが0件の状態になっており、
+-- アプリからは常に0件・保存もできない（定期経費機能が一度も動作していない）状態だった。
+-- このファイルで作ったテーブルは RLS が無効のままなので、その場合この文は何も変えない（冪等）。
+alter table recurring_expenses disable row level security;

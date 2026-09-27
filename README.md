@@ -36,6 +36,7 @@ kokeshi-inventory と同じ思想（個人〜小規模事業主が一人でス�
    - 既存プロジェクトに対して仕入管理項目（仕入日付・保存場所・ロット番号・状態・想定販売期限）を追加する場合は、`supabase/schema.sql` 末尾の `alter table items add column if not exists ...` を SQL Editor で実行してください（anon keyからは実行できないため、Supabase の SQL Editor で手動実行が必要です）
    - 既存プロジェクトに定期経費機能を追加する場合は、`supabase/schema.sql` の `create table if not exists recurring_expenses (...)` と、その直後の `alter table expenses add column if not exists ...` 3行を SQL Editor で実行してください
    - 既存プロジェクトに売上の多販路・複数アカウント対応を追加する場合は、`supabase/schema.sql` の `alter table sales add column if not exists ...` 9行と、その直後の初期化用 `update` 2行を SQL Editor で実行してください
+   - テーブルを追加したのにアプリから常に0件に見える・保存できない場合はRLSを確認してください。ダッシュボードの Table Editor からテーブルを作るとRLSが既定で有効になり、ポリシーが無いと anon key からは全件拒否になります。確認・修正のSQLは `supabase/schema.sql` 末尾のコメントにあります
 2. Storage に `mingay-photos` という名前の公開バケットを作成する
 3. `.env.example` を `.env` にコピーし、Supabaseの URL と anon key を設定する
 
