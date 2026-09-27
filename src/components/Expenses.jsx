@@ -71,9 +71,18 @@ export default function Expenses({ expenses, recurring, reload }) {
       is_recurring: !!form.is_recurring,
       photo_url,
     }
-    if (editing) await supabase.from('expenses').update(row).eq('id', editing.id)
-    else await supabase.from('expenses').insert(row)
+    const { error } = editing
+      ? await supabase.from('expenses').update(row).eq('id', editing.id)
+      : await supabase.from('expenses').insert(row)
     setSaving(false)
+    if (error) {
+      // 以前はエラーを握り潰していたため、保存できていないのにフォームが閉じ、
+      // 原因も分からないまま「入力できない」状態に見えていた。
+      // 入力内容を失わないようフォームは開いたままにし、理由を表示する。
+      console.error('経費の保存に失敗しました:', error)
+      alert(`保存に失敗しました: ${error.message}`)
+      return
+    }
     setFormOpen(false)
     await reload()
   }
