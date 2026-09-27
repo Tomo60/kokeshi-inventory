@@ -33,7 +33,7 @@ function getCat(v) {
 
 const emptyForm = { category: 'rent', amount: '', expense_date: today(), payee: '', payment_method: '', note: '', is_recurring: false }
 
-export default function Expenses({ expenses, recurring, reload }) {
+export default function Expenses({ expenses, recurring, recurringError, reload }) {
   const [view, setView] = useState('records')
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -99,11 +99,13 @@ export default function Expenses({ expenses, recurring, reload }) {
     <>
       <div className="filter-row">
         <button className={'filter-btn' + (view === 'records' ? ' active' : '')} onClick={() => setView('records')}>経費記録</button>
-        <button className={'filter-btn' + (view === 'recurring' ? ' active' : '')} onClick={() => setView('recurring')}>定期経費({recurring.filter((r) => r.active).length})</button>
+        <button className={'filter-btn' + (view === 'recurring' ? ' active' : '')} onClick={() => setView('recurring')}>
+          定期経費({recurringError ? '!' : recurring.filter((r) => r.active).length})
+        </button>
       </div>
 
       {view === 'recurring' ? (
-        <RecurringExpenses recurring={recurring} categories={CATS} reload={reload} />
+        <RecurringExpenses recurring={recurring} recurringError={recurringError} categories={CATS} reload={reload} />
       ) : (
       <>
       <div className="row-between">

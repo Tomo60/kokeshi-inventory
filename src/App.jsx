@@ -26,6 +26,9 @@ export default function App() {
   const [customers, setCustomers] = useState([])
   const [expenses, setExpenses] = useState([])
   const [recurring, setRecurring] = useState([])
+  // 定期経費テーブルだけ読めない場合の理由。
+  // 「0件」と区別できないと、テーブル未作成やアクセス権の問題に気づけないため保持する。
+  const [recurringError, setRecurringError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   // 一時的な接続失敗で再試行中かどうか。「読み込み中...」のままだと
@@ -57,6 +60,7 @@ export default function App() {
       // 定期経費テーブルは後から追加したもの。マイグレーション未適用でもアプリ本体は動かす。
       if (r.error) console.warn('定期経費テンプレートを取得できませんでした:', r.error.message)
       setRecurring(r.error ? [] : r.data || [])
+      setRecurringError(r.error ? describeError(r.error) : null)
       setLoadError(null)
     } catch (err) {
       setLoadError(describeError(err))
@@ -78,7 +82,7 @@ export default function App() {
       .then(() => reload())
   }, [reload])
 
-  const shared = { items, sales, purchases, customers, expenses, recurring, reload }
+  const shared = { items, sales, purchases, customers, expenses, recurring, recurringError, reload }
 
   return (
     <>
