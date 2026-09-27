@@ -5,6 +5,7 @@
 // 将来 Supabase Edge Function + pg_cron の日次バッチへ移す際は
 // generateRecurringExpenses() に service role のクライアントを渡すだけで流用できる。
 import { supabase } from './supabase'
+import { withRetry } from './retry'
 
 const pad2 = (n) => String(n).padStart(2, '0')
 
@@ -55,11 +56,22 @@ export function buildExpenseRow(template, now = new Date()) {
  * 生成できたテンプレートだけ last_generated_month を当月に更新して重複計上を防ぐ。
  *
  * 呼び出し側の起動処理を止めないため、例外は投げずに結果を返す。
+ *
+ * この処理はアプリ起動時の最初のリクエストになるため、DBが休止していたり回線が不安定だと
+ * ここで失敗しやすい。一時的な失敗は withRetry で自動的に再試行する。
+ *
+ * @param {object} [client] Supabaseクライアント（Edge Functionからは service role を渡す）
+ * @param {Date} [now]
+ * @param {{onRetry?: Function}} [options] 再試行時の通知（画面に「接続を再試行中」と出すため）
  * @returns {Promise<{generated: number, skipped: boolean, error: string|null}>}
  */
-export async function generateRecurringExpenses(client = supabase, now = new Date()) {
+export async function generateRecurringExpenses(client = supabase, now = new Date(), options = {}) {
+  const retryOpts = { onRetry: options.onRetry }
   try {
-    const { data, error } = await client.from('recurring_expenses').select('*').eq('active', true)
+    const { data, error } = await withRetry(
+      () => client.from('recurring_expenses').select('*').eq('active', true),
+      retryOpts,
+    )
     if (error) {
       // マイグレーション未適用（テーブルが無い）場合もここに入る。アプリ本体は動かしたいので握りつぶす。
       console.warn('定期経費テンプレートを取得できませんでした:', error.message)
@@ -75,18 +87,21 @@ export async function generateRecurringExpenses(client = supabase, now = new Dat
       const row = buildExpenseRow(template, now)
       // last_generated_month の更新が前回失敗していても二重計上しないための保険。
       // 同一テンプレート・同一計上日の実績が既にあれば insert せずマークだけ進める。
-      const { data: existing, error: existingError } = await client
-        .from('expenses')
-        .select('id')
-        .eq('recurring_expense_id', template.id)
-        .eq('expense_date', row.expense_date)
-        .limit(1)
+      const { data: existing, error: existingError } = await withRetry(
+        () => client
+          .from('expenses')
+          .select('id')
+          .eq('recurring_expense_id', template.id)
+          .eq('expense_date', row.expense_date)
+          .limit(1),
+        retryOpts,
+      )
       if (existingError) {
         console.warn(`定期経費の重複確認に失敗しました (id=${template.id}):`, existingError.message)
         continue
       }
       if (!existing || existing.length === 0) {
-        const { error: insertError } = await client.from('expenses').insert(row)
+        const { error: insertError } = await withRetry(() => client.from('expenses').insert(row), retryOpts)
         if (insertError) {
           console.warn(`定期経費の自動計上に失敗しました (id=${template.id}):`, insertError.message)
           continue
@@ -94,10 +109,13 @@ export async function generateRecurringExpenses(client = supabase, now = new Dat
         generated += 1
       }
       // 計上に成功したものだけ既計上マークを進める（失敗分は次回の起動で再試行される）
-      const { error: updateError } = await client
-        .from('recurring_expenses')
-        .update({ last_generated_month: monthKey })
-        .eq('id', template.id)
+      const { error: updateError } = await withRetry(
+        () => client
+          .from('recurring_expenses')
+          .update({ last_generated_month: monthKey })
+          .eq('id', template.id),
+        retryOpts,
+      )
       if (updateError) {
         console.warn(`定期経費の計上済み月の更新に失敗しました (id=${template.id}):`, updateError.message)
       }

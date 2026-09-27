@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { saveWithRetry } from '../lib/retry'
 import { fmt } from '../lib/format'
 import { isCountedSale } from '../lib/constants'
 import Modal from './Modal'
@@ -19,9 +20,15 @@ export default function Customers({ customers, sales, items, reload }) {
     if (!form.name) return alert('顧客名を入力してください')
     setSaving(true)
     const row = { name: form.name, contact: form.contact || null, note: form.note || null }
-    if (editing) await supabase.from('customers').update(row).eq('id', editing.id)
-    else await supabase.from('customers').insert(row)
+    const { ok } = await saveWithRetry(
+      () => (editing
+        ? supabase.from('customers').update(row).eq('id', editing.id)
+        : supabase.from('customers').insert(row)),
+      '顧客の保存',
+    )
     setSaving(false)
+    // 失敗したらフォームは閉じない（入力内容を残す）
+    if (!ok) return
     setFormOpen(false)
     await reload()
   }

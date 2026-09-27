@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase, uploadPhoto } from '../lib/supabase'
+import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
 import { CONDITIONS } from '../lib/constants'
 import Modal from './Modal'
@@ -85,9 +86,15 @@ export default function Purchases({ purchases, reload }) {
       note: form.note || null,
       photo_url,
     }
-    if (editing) await supabase.from('purchases').update(row).eq('id', editing.id)
-    else await supabase.from('purchases').insert(row)
+    const { ok } = await saveWithRetry(
+      () => (editing
+        ? supabase.from('purchases').update(row).eq('id', editing.id)
+        : supabase.from('purchases').insert(row)),
+      '仕入記録の保存',
+    )
     setSaving(false)
+    // 失敗したらフォームは閉じない（入力内容を残す）
+    if (!ok) return
     setFormOpen(false)
     await reload()
   }
@@ -112,7 +119,7 @@ export default function Purchases({ purchases, reload }) {
     if (!itemForm.name) return alert('商品名を入力してください')
     let photo_url = null
     if (itemPhotoFile) photo_url = await uploadPhoto(itemPhotoFile, 'item')
-    const { data, error } = await supabase.from('items').insert({
+    const { ok, data } = await saveWithRetry(() => supabase.from('items').insert({
       name: itemForm.name,
       category: itemForm.category || null,
       source_place: itemForm.source_place || null,
@@ -126,9 +133,15 @@ export default function Purchases({ purchases, reload }) {
       note: itemForm.note || null,
       photo_url,
       status: 'in_stock',
-    }).select()
-    if (!error && data && data[0]) {
-      await supabase.from('purchase_items').insert({ purchase_id: linking.id, item_id: data[0].id })
+    }).select(), '在庫への追加')
+    // 失敗したらモーダルを閉じずに入力内容を残す（以前は失敗しても「追加しました」と出ていた）
+    if (!ok) return
+    if (data && data[0]) {
+      // 商品自体は登録できているので、仕入との紐付けだけ失敗した場合はそれだけを伝える
+      await saveWithRetry(
+        () => supabase.from('purchase_items').insert({ purchase_id: linking.id, item_id: data[0].id }),
+        '仕入と商品の紐付け（商品は在庫に追加されています）',
+      )
     }
     setLinking(null)
     await reload()

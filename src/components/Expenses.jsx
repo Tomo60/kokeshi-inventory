@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase, uploadPhoto } from '../lib/supabase'
+import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
 import Modal from './Modal'
 import RecurringExpenses from './RecurringExpenses'
@@ -71,18 +72,17 @@ export default function Expenses({ expenses, recurring, reload }) {
       is_recurring: !!form.is_recurring,
       photo_url,
     }
-    const { error } = editing
-      ? await supabase.from('expenses').update(row).eq('id', editing.id)
-      : await supabase.from('expenses').insert(row)
+    // 一時的な通信失敗は saveWithRetry が自動で再試行する。
+    // それでも失敗したときは、以前のように無言でフォームを閉じるのではなく、
+    // 入力内容を残したまま理由を表示する（「入力できない」状態に見せない）。
+    const { ok } = await saveWithRetry(
+      () => (editing
+        ? supabase.from('expenses').update(row).eq('id', editing.id)
+        : supabase.from('expenses').insert(row)),
+      '経費の保存',
+    )
     setSaving(false)
-    if (error) {
-      // 以前はエラーを握り潰していたため、保存できていないのにフォームが閉じ、
-      // 原因も分からないまま「入力できない」状態に見えていた。
-      // 入力内容を失わないようフォームは開いたままにし、理由を表示する。
-      console.error('経費の保存に失敗しました:', error)
-      alert(`保存に失敗しました: ${error.message}`)
-      return
-    }
+    if (!ok) return
     setFormOpen(false)
     await reload()
   }

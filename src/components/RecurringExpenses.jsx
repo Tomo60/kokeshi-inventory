@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
 import { monthKeyOf } from '../lib/recurringExpenses'
 import Modal from './Modal'
@@ -59,18 +60,24 @@ export default function RecurringExpenses({ recurring, categories, reload }) {
       start_date: form.start_date || today(),
       end_date: form.end_date || null,
     }
-    const { error } = editing
-      ? await supabase.from('recurring_expenses').update(row).eq('id', editing.id)
-      : await supabase.from('recurring_expenses').insert(row)
+    const { ok } = await saveWithRetry(
+      () => (editing
+        ? supabase.from('recurring_expenses').update(row).eq('id', editing.id)
+        : supabase.from('recurring_expenses').insert(row)),
+      '定期経費テンプレートの保存',
+    )
     setSaving(false)
-    if (error) return alert(`保存に失敗しました: ${error.message}`)
+    if (!ok) return
     setFormOpen(false)
     await reload()
   }
 
   async function toggleActive(r) {
-    const { error } = await supabase.from('recurring_expenses').update({ active: !r.active }).eq('id', r.id)
-    if (error) return alert(`更新に失敗しました: ${error.message}`)
+    const { ok } = await saveWithRetry(
+      () => supabase.from('recurring_expenses').update({ active: !r.active }).eq('id', r.id),
+      r.active ? '自動計上の停止' : '自動計上の再開',
+    )
+    if (!ok) return
     await reload()
   }
 

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
 import { PLATFORMS, SALE_STATUSES, ACCOUNT_REQUIRED_PLATFORMS, platformLabel, saleStatusLabel, isCountedSale } from '../lib/constants'
 import Modal from './Modal'
@@ -73,14 +74,18 @@ export default function Sales({ items, sales, customers, reload }) {
       sold_at: form.sold_at,
       note: form.note || null,
     }
-    const { error } = await supabase.from('sales').insert(row)
-    if (error) {
+    const { ok } = await saveWithRetry(() => supabase.from('sales').insert(row), '販売記録の保存')
+    if (!ok) {
       setSaving(false)
-      return alert(`保存に失敗しました: ${error.message}`)
+      return
     }
     // 返品・キャンセルは在庫を減らさない（売れていないため在庫に残す）
     if (form.item_id && isCountedSale(row)) {
-      await supabase.from('items').update({ status: 'sold' }).eq('id', form.item_id)
+      // ここで失敗しても販売記録自体は保存済みなので、在庫の更新漏れだけを伝える
+      await saveWithRetry(
+        () => supabase.from('items').update({ status: 'sold' }).eq('id', form.item_id),
+        '在庫の売済み更新（販売記録は保存されています）',
+      )
     }
     setSaving(false)
     setFormOpen(false)
