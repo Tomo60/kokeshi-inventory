@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
-import { monthKeyOf, dueDateFor, dueDateOf } from '../lib/recurringExpenses'
+import { monthKeyOf, dueDateFor, dueDateOf, nonBusinessReason } from '../lib/recurringExpenses'
 import Modal from './Modal'
 
 const emptyForm = {
@@ -108,7 +108,7 @@ export default function RecurringExpenses({ recurring, recurringError, categorie
         <div className="calc-result">毎月の固定費合計 {fmt(monthlyTotal)}</div>
         <div className="item-sub" style={{ marginTop: 4 }}>
           アプリを開いたときに、計上日を過ぎた当月分が経費記録へ自動で追加されます。
-          計上日が土曜・日曜にあたる月は、金融機関の休業日を避けて次の月曜に計上します
+          計上日が土日・祝日にあたる月は、金融機関の休業日を避けて休み明けの営業日に計上します
         </div>
       </div>
 
@@ -141,7 +141,7 @@ export default function RecurringExpenses({ recurring, recurringError, categorie
             {r.note && <div className="item-name" style={{ marginTop: 6 }}>{r.note}</div>}
             {actualDue !== plainDue && (
               <div className="item-sub" style={{ marginTop: 4 }}>
-                今月は{r.day_of_month}日が休日のため {actualDue} に計上します
+                今月は{r.day_of_month}日が{nonBusinessReason(plainDue)}のため {actualDue} に計上します
               </div>
             )}
             {(r.start_date || r.end_date) && (
