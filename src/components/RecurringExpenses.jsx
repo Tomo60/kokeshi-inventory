@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
-import { monthKeyOf } from '../lib/recurringExpenses'
+import { monthKeyOf, dueDateFor, dueDateOf } from '../lib/recurringExpenses'
 import Modal from './Modal'
 
 const emptyForm = {
@@ -107,14 +107,20 @@ export default function RecurringExpenses({ recurring, recurringError, categorie
         <div className="item-sub">有効なテンプレート {activeList.length}件</div>
         <div className="calc-result">毎月の固定費合計 {fmt(monthlyTotal)}</div>
         <div className="item-sub" style={{ marginTop: 4 }}>
-          アプリを開いたときに、計上日を過ぎた当月分が経費記録へ自動で追加されます
+          アプリを開いたときに、計上日を過ぎた当月分が経費記録へ自動で追加されます。
+          計上日が土曜・日曜にあたる月は、金融機関の休業日を避けて次の月曜に計上します
         </div>
       </div>
 
       {recurring.length === 0 && <div className="empty">家賃などの毎月発生する固定費を登録してください</div>}
       {recurring.map((r) => {
         const cat = getCat(r.category)
-        const done = r.last_generated_month === thisMonthKey
+        // 土日ずらしで翌月にかかった月は last_generated_month が先に進むため、
+        // 「その月以降を計上済み」を計上済みとして扱う（判定は shouldGenerate と揃える）
+        const done = !!r.last_generated_month && r.last_generated_month >= thisMonthKey
+        // 当月の計上日が土日でずれる場合は、実際の計上日を出す
+        const plainDue = dueDateOf(thisMonthKey, Number(r.day_of_month))
+        const actualDue = dueDateFor(r, thisMonthKey)
         return (
           <div className="card" key={r.id} style={{ opacity: r.active ? 1 : 0.55 }}>
             <div className="row-between">
@@ -133,6 +139,11 @@ export default function RecurringExpenses({ recurring, recurringError, categorie
               </div>
             )}
             {r.note && <div className="item-name" style={{ marginTop: 6 }}>{r.note}</div>}
+            {actualDue !== plainDue && (
+              <div className="item-sub" style={{ marginTop: 4 }}>
+                今月は{r.day_of_month}日が休日のため {actualDue} に計上します
+              </div>
+            )}
             {(r.start_date || r.end_date) && (
               <div className="item-sub" style={{ marginTop: 4 }}>
                 期間: {r.start_date || '—'} 〜 {r.end_date || '終了日なし'}
