@@ -2,8 +2,43 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
-import { monthKeyOf, dueDateFor, dueDateOf, nonBusinessReason } from '../lib/recurringExpenses'
+import { dueDateOf, nonBusinessReason, nextScheduled } from '../lib/recurringExpenses'
 import Modal from './Modal'
+
+// 「次回の計上予定」の表示。計上されない設定なら理由を出す。
+// 設定は保存できてもエラーは出ないため、これが唯一の気づく手がかりになる。
+function NextDue({ template, box = false }) {
+  const next = nextScheduled(template)
+  const wrap = (children, warn) => (
+    box
+      ? <div className="calc-box" style={{ marginTop: 14, borderColor: warn ? '#e74c3c' : undefined }}>{children}</div>
+      : <div style={{ marginTop: 4 }}>{children}</div>
+  )
+
+  if (!next.date) {
+    return wrap(
+      <div className="item-sub" style={{ color: '#c0392b', fontWeight: 600 }}>
+        ⚠️ この設定では計上されません（{next.reason}）
+      </div>,
+      true,
+    )
+  }
+
+  // 計上日が土日・祝日でずれた場合は、元の日と理由も添える
+  const plainDue = dueDateOf(next.monthKey, Number(template.day_of_month))
+  const shift = next.date !== plainDue
+    ? `（${Number(template.day_of_month)}日が${nonBusinessReason(plainDue)}のため繰り下げ）`
+    : ''
+
+  return wrap(
+    <div className="item-sub">
+      {next.overdue
+        ? <>次にアプリを開いたときに <b>{next.date}</b> 付けで計上されます{shift}</>
+        : <>次回の計上予定: <b>{next.date}</b>{shift}</>}
+    </div>,
+    false,
+  )
+}
 
 const emptyForm = {
   category: 'rent',
@@ -23,9 +58,19 @@ export default function RecurringExpenses({ recurring, recurringError, categorie
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
 
-  const thisMonthKey = monthKeyOf(new Date())
   const activeList = recurring.filter((r) => r.active)
   const monthlyTotal = activeList.reduce((s, r) => s + (r.amount || 0), 0)
+
+  // 入力中の内容で「次回の計上予定」を計算するための、テンプレート相当のオブジェクト。
+  // フォームの値は文字列なので、空文字は null に寄せて保存時と同じ形にする。
+  const draft = {
+    day_of_month: form.day_of_month,
+    active: form.active,
+    start_date: form.start_date || null,
+    end_date: form.end_date || null,
+    // 編集時は既に計上した月を考慮する（当月分が済んでいれば次回は翌月になる）
+    last_generated_month: editing ? editing.last_generated_month : null,
+  }
 
   function getCat(v) {
     return categories.find((c) => c.value === v) || { label: v || 'その他', icon: '📝' }
@@ -115,12 +160,6 @@ export default function RecurringExpenses({ recurring, recurringError, categorie
       {recurring.length === 0 && <div className="empty">家賃などの毎月発生する固定費を登録してください</div>}
       {recurring.map((r) => {
         const cat = getCat(r.category)
-        // 土日ずらしで翌月にかかった月は last_generated_month が先に進むため、
-        // 「その月以降を計上済み」を計上済みとして扱う（判定は shouldGenerate と揃える）
-        const done = !!r.last_generated_month && r.last_generated_month >= thisMonthKey
-        // 当月の計上日が土日でずれる場合は、実際の計上日を出す
-        const plainDue = dueDateOf(thisMonthKey, Number(r.day_of_month))
-        const actualDue = dueDateFor(r, thisMonthKey)
         return (
           <div className="card" key={r.id} style={{ opacity: r.active ? 1 : 0.55 }}>
             <div className="row-between">
@@ -130,7 +169,6 @@ export default function RecurringExpenses({ recurring, recurringError, categorie
                 <span className="recurring-badge">毎月{r.day_of_month}日</span>
                 {!r.active && <span className="status-badge status-sold">停止中</span>}
               </div>
-              <span className="item-sub">{done ? '当月計上済み' : '当月未計上'}</span>
             </div>
             {(r.payee || r.payment_method) && (
               <div className="item-sub" style={{ marginTop: 6 }}>
@@ -139,11 +177,7 @@ export default function RecurringExpenses({ recurring, recurringError, categorie
               </div>
             )}
             {r.note && <div className="item-name" style={{ marginTop: 6 }}>{r.note}</div>}
-            {actualDue !== plainDue && (
-              <div className="item-sub" style={{ marginTop: 4 }}>
-                今月は{r.day_of_month}日が{nonBusinessReason(plainDue)}のため {actualDue} に計上します
-              </div>
-            )}
+            <NextDue template={r} />
             {(r.start_date || r.end_date) && (
               <div className="item-sub" style={{ marginTop: 4 }}>
                 期間: {r.start_date || '—'} 〜 {r.end_date || '終了日なし'}
@@ -178,14 +212,26 @@ export default function RecurringExpenses({ recurring, recurringError, categorie
           <input className="field-input" value={form.payment_method || ''} onChange={(e) => setForm({ ...form, payment_method: e.target.value })} placeholder="例: 口座引き落とし" />
           <label className="field-label">メモ</label>
           <input className="field-input" value={form.note || ''} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="例: 店舗家賃" />
-          <label className="field-label">開始日 *</label>
+          <label className="field-label">開始日 *（この日以降の計上日から対象になります）</label>
           <input className="field-input" type="date" value={form.start_date || ''} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
-          <label className="field-label">終了日（空欄なら終了日なし）</label>
-          <input className="field-input" type="date" value={form.end_date || ''} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+          <label className="field-label">終了日</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input className="field-input" style={{ flex: 1 }} type="date" value={form.end_date || ''} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+            {/* 日付欄をタップしただけで今日の日付が入ってしまう端末があるため、
+                意図せず終了日が入った場合にすぐ戻せるようにする */}
+            {form.end_date && (
+              <button className="edit-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => setForm({ ...form, end_date: '' })}>クリア</button>
+            )}
+          </div>
+          <div className="item-sub" style={{ marginTop: 4 }}>
+            ずっと続く費用は<b>空欄</b>にしてください。日付を入れると、その日以降は計上されなくなります
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14 }}>
             <input type="checkbox" id="f-active" style={{ width: 18, height: 18 }} checked={!!form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
             <label htmlFor="f-active" style={{ fontSize: 13, color: '#555' }}>自動計上を有効にする</label>
           </div>
+          {/* 入力内容でその場に計上予定を出す。計上されない設定なら保存前に気づける */}
+          <NextDue template={draft} box />
           {editing && (
             <div className="item-sub" style={{ marginTop: 10 }}>
               金額を変更しても、すでに計上済みの実績は変わりません。当月分を直したい場合は経費記録側で修正してください。
