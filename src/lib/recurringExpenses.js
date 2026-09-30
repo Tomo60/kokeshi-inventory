@@ -25,6 +25,12 @@ export function previousMonthKey(monthKey) {
   return m === 1 ? `${y - 1}-12` : `${y}-${pad2(m - 1)}`
 }
 
+/** 'YYYY-MM' の1ヶ月後の 'YYYY-MM' を返す */
+export function nextMonthKey(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number)
+  return m === 12 ? `${y + 1}-01` : `${y}-${pad2(m + 1)}`
+}
+
 // 日付文字列の計算はUTCで行う。ローカルタイムで new Date('YYYY-MM-DD') を扱うと
 // タイムゾーンによって1日ずれることがあるため。
 const partsOf = (dateStr) => dateStr.split('-').map(Number)
@@ -133,6 +139,58 @@ export function shouldGenerate(template, now = new Date(), monthKey = monthKeyOf
   if (template.start_date && dueDate < template.start_date) return false
   if (template.end_date && dueDate > template.end_date) return false
   return true
+}
+
+// 「次回の計上予定」を探すときに先読みする月数。
+// 開始日が先の日付に設定されていても見つけられるよう3年分見る。
+const SCAN_MONTHS = 36
+
+/**
+ * テンプレートの「次回の計上予定日」を求める純粋関数。
+ * 一度も計上されない設定になっている場合は、その理由を返す。
+ *
+ * 設定は保存できてもエラーは出ないため、利用者が「計上されない設定」を作ってしまっても
+ * 気づけない。登録フォームと一覧でこの結果を見せて、保存前に気づけるようにする。
+ *
+ * @returns {{date: string, monthKey: string, overdue: boolean, reason: null}
+ *          | {date: null, monthKey: null, overdue: false, reason: string}}
+ *   date: 次に計上される日 'YYYY-MM-DD'
+ *   monthKey: それが何月分か 'YYYY-MM'
+ *   overdue: 計上日を既に過ぎている（次にアプリを開いた時点で計上される）
+ *   reason: 計上されない場合の理由
+ */
+export function nextScheduled(template, now = new Date()) {
+  const none = (reason) => ({ date: null, monthKey: null, overdue: false, reason })
+  if (!template) return none('設定がありません')
+  if (template.active === false) return none('自動計上が無効になっています')
+
+  const day = Number(template.day_of_month)
+  if (!Number.isInteger(day) || day < 1 || day > 28) {
+    return none('計上日は1〜28日で指定してください')
+  }
+
+  const today = dateKeyOf(now)
+  // 終了日だけが原因で外れた最初の計上日。理由の説明に使う。
+  let blockedByEnd = null
+
+  // 自動計上は前月分まで遡って見るため（土日・祝日ずらしで翌月にかかる場合があるため）、
+  // 探索も前月から始める。
+  let monthKey = previousMonthKey(monthKeyOf(now))
+  for (let i = 0; i < SCAN_MONTHS; i++, monthKey = nextMonthKey(monthKey)) {
+    if (template.last_generated_month && template.last_generated_month >= monthKey) continue
+    const due = dueDateFor(template, monthKey)
+    if (template.start_date && due < template.start_date) continue
+    if (template.end_date && due > template.end_date) {
+      if (!blockedByEnd) blockedByEnd = due
+      continue
+    }
+    return { date: due, monthKey, overdue: due <= today, reason: null }
+  }
+
+  if (blockedByEnd) {
+    return none(`終了日(${template.end_date})が次の計上日(${blockedByEnd})より前です`)
+  }
+  return none('開始日より後に計上できる月が見つかりません')
 }
 
 /** テンプレートから expenses に insert する行を組み立てる純粋関数 */
