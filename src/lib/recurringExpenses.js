@@ -4,6 +4,7 @@
 // 判定・行組み立ての純粋関数と Supabase アクセスを分けてあるため、
 // 将来 Supabase Edge Function + pg_cron の日次バッチへ移す際は
 // generateRecurringExpenses() に service role のクライアントを渡すだけで流用できる。
+import { isHoliday, between as holidaysBetween } from '@holiday-jp/holiday_jp'
 import { supabase } from './supabase'
 import { withRetry } from './retry'
 
@@ -34,23 +35,69 @@ export function weekdayOf(dateStr) {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay()
 }
 
+/** 'YYYY-MM-DD' に n 日足した 'YYYY-MM-DD' を返す（月またぎ・年またぎも正しく繰り上がる） */
+export function addDays(dateStr, n) {
+  const [y, m, d] = partsOf(dateStr)
+  const next = new Date(Date.UTC(y, m - 1, d + n))
+  return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`
+}
+
+// @holiday-jp/holiday_jp は Date のローカル時刻の年月日（getFullYear など）を見るため、
+// UTCで組み立てた Date を渡すとタイムゾーンによって1日ずれる。ローカルで組み立てて渡す。
+const localDateOf = (dateStr) => {
+  const [y, m, d] = partsOf(dateStr)
+  return new Date(y, m - 1, d)
+}
+
+/** 'YYYY-MM-DD' が日本の祝日か。振替休日・国民の休日も含む */
+export function isJapaneseHoliday(dateStr) {
+  return isHoliday(localDateOf(dateStr))
+}
+
+/** 'YYYY-MM-DD' の祝日名（祝日でなければ null）。例: '敬老の日' / 'こどもの日 振替休日' */
+export function holidayNameOf(dateStr) {
+  const d = localDateOf(dateStr)
+  const found = holidaysBetween(d, d)
+  return found.length ? found[0].name : null
+}
+
+/** 'YYYY-MM-DD' が金融機関の休業日（土日または祝日）か */
+export function isNonBusinessDay(dateStr) {
+  const w = weekdayOf(dateStr)
+  return w === 0 || w === 6 || isJapaneseHoliday(dateStr)
+}
+
+/** 休業日の理由を日本語で返す。営業日なら null。例: '日曜' / '祝日（敬老の日）' */
+export function nonBusinessReason(dateStr) {
+  const w = weekdayOf(dateStr)
+  if (w === 6) return '土曜'
+  if (w === 0) return '日曜'
+  const name = holidayNameOf(dateStr)
+  return name ? `祝日（${name}）` : null
+}
+
+// ゴールデンウィークは最長で10連休程度。余裕を見た上限で、万一抜けられなくても無限ループにしない。
+const MAX_SHIFT_DAYS = 30
+
 /**
- * 計上日が土日にあたる場合、その次の平日（月曜）へずらす純粋関数。
- * 土曜なら+2日、日曜なら+1日、平日はそのまま。
+ * 計上日が金融機関の休業日（土日・祝日）にあたる場合、休み明けの最初の営業日へずらす純粋関数。
  *
- * 家賃などの引き落としは金融機関の休業日を避けて翌営業日になるため、
- * 実際の出金日に合わせて計上する。
- * 例: 27日が土曜 → 29日(月) / 27日が日曜 → 28日(月)
+ * 家賃などの引き落としは休業日を避けて翌営業日になるため、実際の出金日に合わせて計上する。
+ * 例: 27日が日曜 → 28日(月) / 27日が敬老の日(月) → 連休明けの木曜
+ * ゴールデンウィークのような連休も、平日に当たるまで進めるので正しく抜けられる。
  *
- * 祝日は考慮していない（土日のみ）。2月28日が土日の場合など、
- * ずらした結果が翌月になることもある。呼び出し側はその前提で扱うこと。
+ * 2月28日が休業日の場合など、ずらした結果が翌月になることもある。
+ * 呼び出し側はその前提で扱うこと。
+ *
+ * 12/31〜1/3 は銀行の休業日だが「国民の祝日」ではないため対象外（元日のみ祝日）。
+ * 計上日は1〜28日に制限されており、そこからずらしても年末年始には届かないため実害はない。
  */
 export function shiftToBusinessDay(dateStr) {
-  const shift = { 6: 2, 0: 1 }[weekdayOf(dateStr)] || 0
-  if (shift === 0) return dateStr
-  const [y, m, d] = partsOf(dateStr)
-  const shifted = new Date(Date.UTC(y, m - 1, d + shift))
-  return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`
+  let shifted = dateStr
+  for (let i = 0; i < MAX_SHIFT_DAYS && isNonBusinessDay(shifted); i++) {
+    shifted = addDays(shifted, 1)
+  }
+  return shifted
 }
 
 /**
