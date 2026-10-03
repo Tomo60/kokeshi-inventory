@@ -10,6 +10,9 @@ import RecurringExpenses from './RecurringExpenses'
 // purchases は「販売する商品そのものの仕入」専用。両方に入れると二重計上になるので注意。
 export const CATS = [
   { value: 'rent', label: '家賃', icon: '🏠' },
+  // 入居時に一回限りかかる費用（ハウスクリーニング・鍵交換・仲介手数料など）。
+  // 毎月発生する 'rent'（家賃）とは分けて集計したいので別カテゴリにしている。
+  { value: 'move_in', label: '入居費用', icon: '🔑' },
   { value: 'materials', label: '梱包材料費', icon: '📦' },
   { value: 'shipping', label: '送料', icon: '🚚' },
   // 'platform_fee' は経費（手数料）カテゴリの内部値。
