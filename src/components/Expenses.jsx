@@ -44,9 +44,13 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
   const [photoFile, setPhotoFile] = useState(null)
   const [photoPreview, setPhotoPreview] = useState(null)
   const [saving, setSaving] = useState(false)
+  // 削除の確認画面を出しているか。取り消せない操作なので、必ずここを通す
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
-  function openAdd() { setEditing(null); setForm(emptyForm); setPhotoFile(null); setPhotoPreview(null); setFormOpen(true) }
-  function openEdit(e) { setEditing(e); setForm({ ...emptyForm, ...e }); setPhotoFile(null); setPhotoPreview(null); setFormOpen(true) }
+  function closeForm() { setFormOpen(false); setConfirmingDelete(false) }
+  function openAdd() { setEditing(null); setForm(emptyForm); setPhotoFile(null); setPhotoPreview(null); setConfirmingDelete(false); setFormOpen(true) }
+  function openEdit(e) { setEditing(e); setForm({ ...emptyForm, ...e }); setPhotoFile(null); setPhotoPreview(null); setConfirmingDelete(false); setFormOpen(true) }
 
   function onPhotoChange(e) {
     const file = e.target.files[0]
@@ -86,7 +90,22 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
     )
     setSaving(false)
     if (!ok) return
-    setFormOpen(false)
+    closeForm()
+    await reload()
+  }
+
+  // 取り消せない操作なので、確認画面を経たうえでのみ呼ばれる。
+  // 失敗時は保存と同じように理由を画面に出し、確認画面は閉じずに残す。
+  async function remove() {
+    if (!editing) return
+    setDeleting(true)
+    const { ok } = await saveWithRetry(
+      () => supabase.from('expenses').delete().eq('id', editing.id),
+      '経費の削除',
+    )
+    setDeleting(false)
+    if (!ok) return
+    closeForm()
     await reload()
   }
 
@@ -165,8 +184,36 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
         )
       })}
 
-      {formOpen && (
-        <Modal title={editing ? '経費編集' : '経費登録'} onClose={() => setFormOpen(false)}>
+      {/* 削除の確認画面。取り消せないので、何を消すのかを並べて見せてから実行する */}
+      {formOpen && confirmingDelete && editing && (
+        <Modal title="この経費記録を削除しますか？" onClose={() => setConfirmingDelete(false)}>
+          <div className="calc-box" style={{ marginTop: 0 }}>
+            <div className="item-sub">日付: <b>{editing.expense_date}</b></div>
+            <div className="item-sub">費目: <b>{getCat(editing.category).icon} {getCat(editing.category).label}</b></div>
+            <div className="item-sub">メモ: <b>{editing.note || '（なし）'}</b></div>
+            <div className="calc-result" style={{ marginTop: 6 }}>{fmt(editing.amount)}</div>
+          </div>
+          <div className="item-sub" style={{ marginTop: 12, color: '#c0392b', fontWeight: 700 }}>
+            ⚠️ この操作は取り消せません
+          </div>
+          {editing.recurring_expense_id && (
+            <div className="item-sub" style={{ marginTop: 10 }}>
+              この記録は定期経費テンプレートから<b>自動計上</b>されたものです。削除しても、
+              テンプレート側の計上済みの月の記録は変わらないため、<b>同じ月が自動で計上し直されることはありません</b>。
+              この月の分を改めて残したい場合は、手入力で登録してください。
+            </div>
+          )}
+          <button className="danger-btn" disabled={deleting} onClick={remove}>
+            {deleting ? '削除中...' : '削除する'}
+          </button>
+          <button className="cancel-btn" disabled={deleting} onClick={() => setConfirmingDelete(false)}>
+            やめる
+          </button>
+        </Modal>
+      )}
+
+      {formOpen && !confirmingDelete && (
+        <Modal title={editing ? '経費編集' : '経費登録'} onClose={closeForm}>
           {(editing?.photo_url || photoPreview) && <img src={photoPreview || editing.photo_url} className="photo-preview" style={{ display: 'block' }} />}
           <label className="field-label">カテゴリ *</label>
           <select className="field-input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
@@ -195,6 +242,12 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
             </div>
           )}
           <button className="save-btn" disabled={saving} onClick={save}>{saving ? '保存中...' : editing ? '保存する' : '登録する'}</button>
+          {/* 登録時には出さない。既にある記録を消すときだけ */}
+          {editing && (
+            <button className="delete-btn" disabled={saving} onClick={() => setConfirmingDelete(true)}>
+              この記録を削除する
+            </button>
+          )}
         </Modal>
       )}
       </>
