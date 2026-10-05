@@ -13,6 +13,9 @@ export const CATS = [
   // 入居時に一回限りかかる費用（ハウスクリーニング・鍵交換・仲介手数料など）。
   // 毎月発生する 'rent'（家賃）とは分けて集計したいので別カテゴリにしている。
   { value: 'move_in', label: '入居費用', icon: '🔑' },
+  // 水道代・ガス代・電気代など。家賃と同じ物件にかかる費用だが、
+  // 毎月額が変わるので 'rent'（定額の家賃）とは分けて集計する。
+  { value: 'utilities', label: '水道光熱費', icon: '💡' },
   { value: 'materials', label: '梱包材料費', icon: '📦' },
   { value: 'shipping', label: '送料', icon: '🚚' },
   // 'platform_fee' は経費（手数料）カテゴリの内部値。
