@@ -131,6 +131,25 @@ update sales set needs_review = true where channel_account is null and created_a
 -- 対象行が無ければ何も起きないため、何度実行しても安全（冪等）。
 update expenses set category = 'platform_fee' where category = 'platform';
 
+-- 仕入れの後追い集計対応。メルカリ等での購入を、取引単位で突き合わせられるようにする。
+-- 列名と型は sales 側の同名列（channel_account / external_order_no / needs_review）に合わせている。
+-- point_used / coupon_used を not null default 0 にしているのは、既存の金額系（total_amount /
+-- quantity）と揃えるためで、`total_amount - point_used` のような式でNULLが伝播するのを防ぐ。
+alter table purchases add column if not exists channel_account text; -- 販路内のアカウント
+alter table purchases add column if not exists external_order_no text; -- 取引ID等。API連携が無いため任意入力
+alter table purchases add column if not exists point_used numeric not null default 0; -- 利用ポイント
+alter table purchases add column if not exists coupon_used numeric not null default 0; -- 利用クーポン
+alter table purchases add column if not exists payment_method text; -- 支払方法
+alter table purchases add column if not exists needs_review boolean not null default false; -- 取引IDやアカウントが未確定な行のフラグ
+
+-- 取引IDの二重登録を防ぐ部分ユニーク索引。
+-- 取引IDは任意入力なので、NULL を対象外にして未入力の行は何件でも作れるようにしている。
+-- 販路ごとに採番体系が違うため、販路（purchases は source、sales は platform）との複合にしている。
+create unique index if not exists purchases_source_order_no_uniq
+  on purchases (source, external_order_no) where external_order_no is not null;
+create unique index if not exists sales_platform_order_no_uniq
+  on sales (platform, external_order_no) where external_order_no is not null;
+
 -- Row Level Security: disabled by default for personal single-user use with the anon key.
 -- Enable + add policies if you plan to expose this beyond a trusted personal device.
 --
