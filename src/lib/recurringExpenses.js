@@ -1,0 +1,297 @@
+// 定期経費（家賃などの毎月固定費）の自動計上ロジック。
+//
+// 現状はアプリ起動時に generateRecurringExpenses() を1回呼ぶ方式だが、
+// 判定・行組み立ての純粋関数と Supabase アクセスを分けてあるため、
+// 将来 Supabase Edge Function + pg_cron の日次バッチへ移す際は
+// generateRecurringExpenses() に service role のクライアントを渡すだけで流用できる。
+import { isHoliday, between as holidaysBetween } from '@holiday-jp/holiday_jp'
+import { supabase } from './supabase'
+import { withRetry } from './retry'
+
+const pad2 = (n) => String(n).padStart(2, '0')
+
+/** Date から 'YYYY-MM' を得る（ローカルタイム基準） */
+export const monthKeyOf = (date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`
+
+/** Date から 'YYYY-MM-DD' を得る（ローカルタイム基準。toISOString はUTCになるため使わない） */
+export const dateKeyOf = (date) => `${monthKeyOf(date)}-${pad2(date.getDate())}`
+
+/** 'YYYY-MM' と日から 'YYYY-MM-DD' を組み立てる */
+export const dueDateOf = (monthKey, dayOfMonth) => `${monthKey}-${pad2(dayOfMonth)}`
+
+/** 'YYYY-MM' の1ヶ月前の 'YYYY-MM' を返す */
+export function previousMonthKey(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number)
+  return m === 1 ? `${y - 1}-12` : `${y}-${pad2(m - 1)}`
+}
+
+/** 'YYYY-MM' の1ヶ月後の 'YYYY-MM' を返す */
+export function nextMonthKey(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number)
+  return m === 12 ? `${y + 1}-01` : `${y}-${pad2(m + 1)}`
+}
+
+// 日付文字列の計算はUTCで行う。ローカルタイムで new Date('YYYY-MM-DD') を扱うと
+// タイムゾーンによって1日ずれることがあるため。
+const partsOf = (dateStr) => dateStr.split('-').map(Number)
+
+/** 'YYYY-MM-DD' の曜日を返す（0=日曜 〜 6=土曜） */
+export function weekdayOf(dateStr) {
+  const [y, m, d] = partsOf(dateStr)
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+}
+
+/** 'YYYY-MM-DD' に n 日足した 'YYYY-MM-DD' を返す（月またぎ・年またぎも正しく繰り上がる） */
+export function addDays(dateStr, n) {
+  const [y, m, d] = partsOf(dateStr)
+  const next = new Date(Date.UTC(y, m - 1, d + n))
+  return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`
+}
+
+// @holiday-jp/holiday_jp は Date のローカル時刻の年月日（getFullYear など）を見るため、
+// UTCで組み立てた Date を渡すとタイムゾーンによって1日ずれる。ローカルで組み立てて渡す。
+const localDateOf = (dateStr) => {
+  const [y, m, d] = partsOf(dateStr)
+  return new Date(y, m - 1, d)
+}
+
+/** 'YYYY-MM-DD' が日本の祝日か。振替休日・国民の休日も含む */
+export function isJapaneseHoliday(dateStr) {
+  return isHoliday(localDateOf(dateStr))
+}
+
+/** 'YYYY-MM-DD' の祝日名（祝日でなければ null）。例: '敬老の日' / 'こどもの日 振替休日' */
+export function holidayNameOf(dateStr) {
+  const d = localDateOf(dateStr)
+  const found = holidaysBetween(d, d)
+  return found.length ? found[0].name : null
+}
+
+/** 'YYYY-MM-DD' が金融機関の休業日（土日または祝日）か */
+export function isNonBusinessDay(dateStr) {
+  const w = weekdayOf(dateStr)
+  return w === 0 || w === 6 || isJapaneseHoliday(dateStr)
+}
+
+/** 休業日の理由を日本語で返す。営業日なら null。例: '日曜' / '祝日（敬老の日）' */
+export function nonBusinessReason(dateStr) {
+  const w = weekdayOf(dateStr)
+  if (w === 6) return '土曜'
+  if (w === 0) return '日曜'
+  const name = holidayNameOf(dateStr)
+  return name ? `祝日（${name}）` : null
+}
+
+// ゴールデンウィークは最長で10連休程度。余裕を見た上限で、万一抜けられなくても無限ループにしない。
+const MAX_SHIFT_DAYS = 30
+
+/**
+ * 計上日が金融機関の休業日（土日・祝日）にあたる場合、休み明けの最初の営業日へずらす純粋関数。
+ *
+ * 家賃などの引き落としは休業日を避けて翌営業日になるため、実際の出金日に合わせて計上する。
+ * 例: 27日が日曜 → 28日(月) / 27日が敬老の日(月) → 連休明けの木曜
+ * ゴールデンウィークのような連休も、平日に当たるまで進めるので正しく抜けられる。
+ *
+ * 2月28日が休業日の場合など、ずらした結果が翌月になることもある。
+ * 呼び出し側はその前提で扱うこと。
+ *
+ * 12/31〜1/3 は銀行の休業日だが「国民の祝日」ではないため対象外（元日のみ祝日）。
+ * 計上日は1〜28日に制限されており、そこからずらしても年末年始には届かないため実害はない。
+ */
+export function shiftToBusinessDay(dateStr) {
+  let shifted = dateStr
+  for (let i = 0; i < MAX_SHIFT_DAYS && isNonBusinessDay(shifted); i++) {
+    shifted = addDays(shifted, 1)
+  }
+  return shifted
+}
+
+/**
+ * テンプレートの、ある月(monthKey)分の実際の計上日を返す。
+ * 土日ずらしを適用済みの 'YYYY-MM-DD'。
+ */
+export function dueDateFor(template, monthKey) {
+  return shiftToBusinessDay(dueDateOf(monthKey, Number(template.day_of_month)))
+}
+
+/**
+ * テンプレートが、指定した月(monthKey)分の計上対象かを判定する純粋関数。
+ * - active であること
+ * - その月分の計上日（土日ずらし後）を今日が過ぎている（当日を含む）こと
+ * - その月分をまだ生成していないこと
+ * - 計上日が start_date 〜 end_date の範囲内であること
+ *
+ * 「まだ生成していない」の判定に >= を使っているのは、ずらした結果が翌月に
+ * かかる月（2月28日が土日の場合など）を翌月になってから計上する際、
+ * 既に計上済みの月を二重に計上しないようにするため。
+ */
+export function shouldGenerate(template, now = new Date(), monthKey = monthKeyOf(now)) {
+  if (!template || template.active === false) return false
+  const day = Number(template.day_of_month)
+  if (!Number.isInteger(day) || day < 1 || day > 28) return false
+
+  // その月分、またはそれ以降の月分を既に計上済みなら対象外
+  if (template.last_generated_month && template.last_generated_month >= monthKey) return false
+
+  const dueDate = dueDateFor(template, monthKey)
+  if (dateKeyOf(now) < dueDate) return false
+
+  if (template.start_date && dueDate < template.start_date) return false
+  if (template.end_date && dueDate > template.end_date) return false
+  return true
+}
+
+// 「次回の計上予定」を探すときに先読みする月数。
+// 開始日が先の日付に設定されていても見つけられるよう3年分見る。
+const SCAN_MONTHS = 36
+
+/**
+ * テンプレートの「次回の計上予定日」を求める純粋関数。
+ * 一度も計上されない設定になっている場合は、その理由を返す。
+ *
+ * 設定は保存できてもエラーは出ないため、利用者が「計上されない設定」を作ってしまっても
+ * 気づけない。登録フォームと一覧でこの結果を見せて、保存前に気づけるようにする。
+ *
+ * @returns {{date: string, monthKey: string, overdue: boolean, reason: null}
+ *          | {date: null, monthKey: null, overdue: false, reason: string}}
+ *   date: 次に計上される日 'YYYY-MM-DD'
+ *   monthKey: それが何月分か 'YYYY-MM'
+ *   overdue: 計上日を既に過ぎている（次にアプリを開いた時点で計上される）
+ *   reason: 計上されない場合の理由
+ */
+export function nextScheduled(template, now = new Date()) {
+  const none = (reason) => ({ date: null, monthKey: null, overdue: false, reason })
+  if (!template) return none('設定がありません')
+  if (template.active === false) return none('自動計上が無効になっています')
+
+  const day = Number(template.day_of_month)
+  if (!Number.isInteger(day) || day < 1 || day > 28) {
+    return none('計上日は1〜28日で指定してください')
+  }
+
+  const today = dateKeyOf(now)
+  // 終了日だけが原因で外れた最初の計上日。理由の説明に使う。
+  let blockedByEnd = null
+
+  // 自動計上は前月分まで遡って見るため（土日・祝日ずらしで翌月にかかる場合があるため）、
+  // 探索も前月から始める。
+  let monthKey = previousMonthKey(monthKeyOf(now))
+  for (let i = 0; i < SCAN_MONTHS; i++, monthKey = nextMonthKey(monthKey)) {
+    if (template.last_generated_month && template.last_generated_month >= monthKey) continue
+    const due = dueDateFor(template, monthKey)
+    if (template.start_date && due < template.start_date) continue
+    if (template.end_date && due > template.end_date) {
+      if (!blockedByEnd) blockedByEnd = due
+      continue
+    }
+    return { date: due, monthKey, overdue: due <= today, reason: null }
+  }
+
+  if (blockedByEnd) {
+    return none(`終了日(${template.end_date})が次の計上日(${blockedByEnd})より前です`)
+  }
+  return none('開始日より後に計上できる月が見つかりません')
+}
+
+/** テンプレートから expenses に insert する行を組み立てる純粋関数 */
+export function buildExpenseRow(template, now = new Date(), monthKey = monthKeyOf(now)) {
+  return {
+    category: template.category,
+    amount: template.amount,
+    expense_date: dueDateFor(template, monthKey),
+    payee: template.payee || null,
+    payment_method: template.payment_method || null,
+    note: template.note || null,
+    is_recurring: true,
+    recurring_expense_id: template.id,
+  }
+}
+
+/**
+ * 有効な定期経費テンプレートのうち未計上のものを expenses へ自動計上する。
+ * 生成できたテンプレートだけ last_generated_month をその月に更新して重複計上を防ぐ。
+ *
+ * 前月と当月の2ヶ月分を見るのは、土日ずらしによって計上日が翌月へかかる場合
+ * （2月28日が土日の場合など）に、前月分を取りこぼさないため。
+ *
+ * 呼び出し側の起動処理を止めないため、例外は投げずに結果を返す。
+ *
+ * この処理はアプリ起動時の最初のリクエストになるため、DBが休止していたり回線が不安定だと
+ * ここで失敗しやすい。一時的な失敗は withRetry で自動的に再試行する。
+ *
+ * @param {object} [client] Supabaseクライアント（Edge Functionからは service role を渡す）
+ * @param {Date} [now]
+ * @param {{onRetry?: Function}} [options] 再試行時の通知（画面に「接続を再試行中」と出すため）
+ * @returns {Promise<{generated: number, skipped: boolean, error: string|null}>}
+ */
+export async function generateRecurringExpenses(client = supabase, now = new Date(), options = {}) {
+  const retryOpts = { onRetry: options.onRetry }
+  try {
+    const { data, error } = await withRetry(
+      () => client.from('recurring_expenses').select('*').eq('active', true),
+      retryOpts,
+    )
+    if (error) {
+      // マイグレーション未適用（テーブルが無い）場合もここに入る。アプリ本体は動かしたいので握りつぶす。
+      console.warn('定期経費テンプレートを取得できませんでした:', error.message)
+      return { generated: 0, skipped: true, error: error.message }
+    }
+
+    const templates = data || []
+    if (templates.length === 0) return { generated: 0, skipped: false, error: null }
+
+    // 古い月から順に処理する。last_generated_month には最後に計上した月が残る。
+    const currentMonth = monthKeyOf(now)
+    const months = [previousMonthKey(currentMonth), currentMonth]
+
+    let generated = 0
+    for (const monthKey of months) {
+      for (const template of templates) {
+        if (!shouldGenerate(template, now, monthKey)) continue
+
+        const row = buildExpenseRow(template, now, monthKey)
+        // last_generated_month の更新が前回失敗していても二重計上しないための保険。
+        // 同一テンプレート・同一計上日の実績が既にあれば insert せずマークだけ進める。
+        const { data: existing, error: existingError } = await withRetry(
+          () => client
+            .from('expenses')
+            .select('id')
+            .eq('recurring_expense_id', template.id)
+            .eq('expense_date', row.expense_date)
+            .limit(1),
+          retryOpts,
+        )
+        if (existingError) {
+          console.warn(`定期経費の重複確認に失敗しました (id=${template.id}):`, existingError.message)
+          continue
+        }
+        if (!existing || existing.length === 0) {
+          const { error: insertError } = await withRetry(() => client.from('expenses').insert(row), retryOpts)
+          if (insertError) {
+            console.warn(`定期経費の自動計上に失敗しました (id=${template.id}):`, insertError.message)
+            continue
+          }
+          generated += 1
+        }
+        // 計上に成功したものだけ既計上マークを進める（失敗分は次回の起動で再試行される）
+        const { error: updateError } = await withRetry(
+          () => client
+            .from('recurring_expenses')
+            .update({ last_generated_month: monthKey })
+            .eq('id', template.id),
+          retryOpts,
+        )
+        if (updateError) {
+          console.warn(`定期経費の計上済み月の更新に失敗しました (id=${template.id}):`, updateError.message)
+          continue
+        }
+        // 後続の月の判定に反映させるため、手元のテンプレートも更新しておく
+        template.last_generated_month = monthKey
+      }
+    }
+    return { generated, skipped: false, error: null }
+  } catch (err) {
+    console.warn('定期経費の自動計上でエラーが発生しました:', err)
+    return { generated: 0, skipped: true, error: err.message || String(err) }
+  }
+}
