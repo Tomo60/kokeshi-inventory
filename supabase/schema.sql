@@ -150,6 +150,26 @@ create unique index if not exists purchases_source_order_no_uniq
 create unique index if not exists sales_platform_order_no_uniq
   on sales (platform, external_order_no) where external_order_no is not null;
 
+-- 事業情報（古物商許可の記録）。
+-- 古物営業法で定められた「許可証の番号・交付年月日・公安委員会」を帳簿側からも参照できるようにする。
+--
+-- 設計上の決めごと:
+-- ・1行しか存在しない設計。`id smallint primary key default 1 check (id = 1)` により、
+--   2行目を入れようとすると制約違反で弾かれる（取り違えや二重登録が起きない）。
+-- ・氏名・生年月日・住所などの個人情報は意図的に持たない。
+--   許可証そのものの記録に必要なのは番号・交付日・公安委員会・行商の有無であり、
+--   Supabaseの公開鍵がブラウザに配信される構成では、持たせない方が安全なため。
+-- ・peddling（行商する／しない）は許可証の記載事項なので、boolean で保持する。
+create table if not exists business_info (
+  id smallint primary key default 1 check (id = 1),
+  license_no text, -- 許可証番号（例: 第000000000000号）
+  license_issued_on date, -- 交付年月日
+  public_safety_commission text, -- 許可を出した公安委員会
+  peddling boolean not null default false, -- 行商する(true)／しない(false)
+  note text,
+  updated_at timestamptz not null default now()
+);
+
 -- Row Level Security: disabled by default for personal single-user use with the anon key.
 -- Enable + add policies if you plan to expose this beyond a trusted personal device.
 --
@@ -166,3 +186,20 @@ create unique index if not exists sales_platform_order_no_uniq
 -- アプリからは常に0件・保存もできない（定期経費機能が一度も動作していない）状態だった。
 -- このファイルで作ったテーブルは RLS が無効のままなので、その場合この文は何も変えない（冪等）。
 alter table recurring_expenses disable row level security;
+
+-- business_info の RLS の扱い。
+-- 「既存テーブルと同じ方針（= 無効）」と「ポリシーを必ず含める」の両方を満たすため、
+-- ポリシーを先に作ってから RLS を無効にしている。意図は次の2点:
+--   1. いまは既存テーブルとまったく同じ挙動（anon key で読み書きできる）になる。
+--   2. 将来 RLS を有効にしたときに、ポリシー0件で全件拒否になる事故（recurring_expenses で実際に起きた）が起きない。
+-- create policy には if not exists が無いため、存在確認を挟んで何度実行しても安全にしている。
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'business_info' and policyname = 'business_info_anon_all'
+  ) then
+    create policy business_info_anon_all on business_info for all using (true) with check (true);
+  end if;
+end $$;
+alter table business_info disable row level security;

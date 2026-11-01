@@ -8,6 +8,7 @@ import Sales from './components/Sales'
 import Purchases from './components/Purchases'
 import Expenses from './components/Expenses'
 import Customers from './components/Customers'
+import Settings from './components/Settings'
 
 const TABS = [
   { key: 'dashboard', label: 'ダッシュボード', icon: '📊' },
@@ -16,6 +17,7 @@ const TABS = [
   { key: 'purchases', label: '仕入', icon: '🛒' },
   { key: 'expenses', label: '経費', icon: '💴' },
   { key: 'customers', label: '顧客', icon: '👥' },
+  { key: 'settings', label: '設定', icon: '⚙️' },
 ]
 
 export default function App() {
@@ -26,9 +28,13 @@ export default function App() {
   const [customers, setCustomers] = useState([])
   const [expenses, setExpenses] = useState([])
   const [recurring, setRecurring] = useState([])
+  // 事業情報（古物商許可）。1行だけのテーブルなので配列ではなくオブジェクト（未登録なら null）。
+  const [businessInfo, setBusinessInfo] = useState(null)
   // 定期経費テーブルだけ読めない場合の理由。
   // 「0件」と区別できないと、テーブル未作成やアクセス権の問題に気づけないため保持する。
   const [recurringError, setRecurringError] = useState(null)
+  // 事業情報テーブルも後から追加したものなので、同じ理由で読めなかった理由を保持する。
+  const [businessInfoError, setBusinessInfoError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   // 一時的な接続失敗で再試行中かどうか。「読み込み中...」のままだと
@@ -42,13 +48,14 @@ export default function App() {
     const onRetry = () => setReconnecting(true)
     const fetchTable = (build) => withRetry(build, { onRetry })
     try {
-      const [i, s, p, c, e, r] = await Promise.all([
+      const [i, s, p, c, e, r, b] = await Promise.all([
         fetchTable(() => supabase.from('items').select('*').order('created_at', { ascending: false })),
         fetchTable(() => supabase.from('sales').select('*').order('sold_at', { ascending: false })),
         fetchTable(() => supabase.from('purchases').select('*').order('created_at', { ascending: false })),
         fetchTable(() => supabase.from('customers').select('*').order('created_at', { ascending: false })),
         fetchTable(() => supabase.from('expenses').select('*').order('expense_date', { ascending: false })),
         fetchTable(() => supabase.from('recurring_expenses').select('*').order('day_of_month', { ascending: true })),
+        fetchTable(() => supabase.from('business_info').select('*').limit(1)),
       ])
       const firstError = [i, s, p, c, e].find((x) => x.error)?.error
       if (firstError) throw firstError
@@ -61,6 +68,11 @@ export default function App() {
       if (r.error) console.warn('定期経費テンプレートを取得できませんでした:', r.error.message)
       setRecurring(r.error ? [] : r.data || [])
       setRecurringError(r.error ? describeError(r.error) : null)
+      // 事業情報テーブルも同様に、マイグレーション未適用でもアプリ本体は動かす。
+      // ここで firstError に含めてしまうと、テーブルを作る前はアプリ全体が開けなくなる。
+      if (b.error) console.warn('事業情報を取得できませんでした:', b.error.message)
+      setBusinessInfo(b.error ? null : (b.data && b.data[0]) || null)
+      setBusinessInfoError(b.error ? describeError(b.error) : null)
       setLoadError(null)
     } catch (err) {
       setLoadError(describeError(err))
@@ -82,7 +94,7 @@ export default function App() {
       .then(() => reload())
   }, [reload])
 
-  const shared = { items, sales, purchases, customers, expenses, recurring, recurringError, reload }
+  const shared = { items, sales, purchases, customers, expenses, recurring, recurringError, businessInfo, businessInfoError, reload }
 
   return (
     <>
@@ -120,6 +132,7 @@ export default function App() {
             {tab === 'purchases' && <Purchases {...shared} />}
             {tab === 'expenses' && <Expenses {...shared} />}
             {tab === 'customers' && <Customers {...shared} />}
+            {tab === 'settings' && <Settings {...shared} />}
           </>
         )}
       </div>
