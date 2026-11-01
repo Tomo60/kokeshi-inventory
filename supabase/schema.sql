@@ -150,6 +150,36 @@ create unique index if not exists purchases_source_order_no_uniq
 create unique index if not exists sales_platform_order_no_uniq
   on sales (platform, external_order_no) where external_order_no is not null;
 
+-- 発送伝票の記録。
+-- sale_id を NULL 可にしているのは、発送した時点では取引が確定していない場合や、
+-- 過去分の伝票を後からまとめて入力する場合に、未紐付けのまま保存して後で結び直せるようにするため。
+-- 1つの売上に対して分割発送・再送が起こりうるので、売上1:発送多の構造にしている
+-- （sales 側に列を足す形にすると1売上1発送しか持てない）。
+-- on delete set null にしているのは、売上を消しても「発送した事実」と伝票の写真は残すため。
+-- shipping_cost を not null default 0 にしているのは既存の金額系と揃えるためで、合計の算出でNULLが伝播するのを防ぐ。
+create table if not exists shipments (
+  id bigint generated always as identity primary key,
+  sale_id bigint references sales(id) on delete set null,
+  shipped_on date not null default current_date,
+  carrier text, -- 'yamato' | 'japanpost' | 'sagawa' | 'other'
+  method text, -- 'rakuraku' | 'nekoposu' | 'compact' | 'takkyubin' | 'yuyu' | 'yupacket' | 'yupacket_post' | 'yupack' | 'other'
+  tracking_no text, -- 追跡番号。API連携が無いため任意入力
+  shipping_cost numeric not null default 0, -- 送料（実額）
+  recipient text, -- お届け先の名前
+  destination text, -- お届け先（都道府県・市区町村など）
+  note text,
+  photo_url text, -- 伝票の写真
+  created_at timestamptz not null default now()
+);
+
+-- 追跡番号の二重登録を防ぐ部分ユニーク索引。
+-- 追跡番号は任意入力なので、NULL を対象外にして未入力の行は何件でも作れるようにしている。
+-- 取引ID（purchases.external_order_no / sales.external_order_no）とは違い、販路や業者との複合にしていない。
+-- 追跡番号は業者をまたいで実質的に一意で、かつ「どの業者で出したか記憶違いのまま再入力する」ことが
+-- 二重登録の主な原因になるため、業者を含めると弾けなくなるのを避けている。
+create unique index if not exists shipments_tracking_no_uniq
+  on shipments (tracking_no) where tracking_no is not null;
+
 -- Row Level Security: disabled by default for personal single-user use with the anon key.
 -- Enable + add policies if you plan to expose this beyond a trusted personal device.
 --
@@ -166,3 +196,20 @@ create unique index if not exists sales_platform_order_no_uniq
 -- アプリからは常に0件・保存もできない（定期経費機能が一度も動作していない）状態だった。
 -- このファイルで作ったテーブルは RLS が無効のままなので、その場合この文は何も変えない（冪等）。
 alter table recurring_expenses disable row level security;
+
+-- shipments の RLS の扱い。
+-- 「既存テーブルと同じ方針（= 無効）」と「ポリシーを必ず含める」の両方を満たすため、
+-- ポリシーを先に作ってから RLS を無効にしている。意図は次の2点:
+--   1. いまは既存7テーブルとまったく同じ挙動（anon key で読み書きできる）になる。
+--   2. 将来 RLS を有効にしたときに、ポリシー0件で全件拒否になる事故（recurring_expenses で実際に起きた）が起きない。
+-- create policy には if not exists が無いため、存在確認を挟んで何度実行しても安全にしている。
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'shipments' and policyname = 'shipments_anon_all'
+  ) then
+    create policy shipments_anon_all on shipments for all using (true) with check (true);
+  end if;
+end $$;
+alter table shipments disable row level security;
