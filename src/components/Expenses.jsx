@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { supabase, uploadPhoto } from '../lib/supabase'
 import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
+import { isCancelled, cancelLabel, cancelRow, restoreRow } from '../lib/cancel'
 import Modal from './Modal'
 import RecurringExpenses from './RecurringExpenses'
 
@@ -39,7 +40,9 @@ function getCat(v) {
 
 const emptyForm = { category: 'rent', amount: '', expense_date: today(), payee: '', payment_method: '', note: '', is_recurring: false }
 
-export default function Expenses({ expenses, recurring, recurringError, reload }) {
+// expenses は有効な行だけ（App.jsx で取り消し済みを除いて渡している）。
+// allExpenses は取り消し済みも含む全行で、「取消済みも表示」のときだけ使う。
+export default function Expenses({ expenses, allExpenses, recurring, recurringError, reload }) {
   const [view, setView] = useState('records')
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -47,13 +50,18 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
   const [photoFile, setPhotoFile] = useState(null)
   const [photoPreview, setPhotoPreview] = useState(null)
   const [saving, setSaving] = useState(false)
-  // 削除の確認画面を出しているか。取り消せない操作なので、必ずここを通す
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  // 取り消しの確認画面を出しているか。記録は残るが、集計から外れる操作なので必ずここを通す
+  const [confirmingCancel, setConfirmingCancel] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelBy, setCancelBy] = useState('')
+  // 取り消し済みの行も一覧に出すか
+  const [showCancelled, setShowCancelled] = useState(false)
+  const [restoringId, setRestoringId] = useState(null)
 
-  function closeForm() { setFormOpen(false); setConfirmingDelete(false) }
-  function openAdd() { setEditing(null); setForm(emptyForm); setPhotoFile(null); setPhotoPreview(null); setConfirmingDelete(false); setFormOpen(true) }
-  function openEdit(e) { setEditing(e); setForm({ ...emptyForm, ...e }); setPhotoFile(null); setPhotoPreview(null); setConfirmingDelete(false); setFormOpen(true) }
+  function closeForm() { setFormOpen(false); setConfirmingCancel(false) }
+  function openAdd() { setEditing(null); setForm(emptyForm); setPhotoFile(null); setPhotoPreview(null); setConfirmingCancel(false); setFormOpen(true) }
+  function openEdit(e) { setEditing(e); setForm({ ...emptyForm, ...e }); setPhotoFile(null); setPhotoPreview(null); setConfirmingCancel(false); setFormOpen(true) }
 
   function onPhotoChange(e) {
     const file = e.target.files[0]
@@ -97,23 +105,36 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
     await reload()
   }
 
-  // 取り消せない操作なので、確認画面を経たうえでのみ呼ばれる。
+  // 行は消さずに取り消しフラグを立てる（論理削除）。確認画面を経たうえでのみ呼ばれる。
   // 失敗時は保存と同じように理由を画面に出し、確認画面は閉じずに残す。
-  async function remove() {
+  async function cancelRecord() {
     if (!editing) return
-    setDeleting(true)
-    const { ok } = await saveWithRetry(
-      () => supabase.from('expenses').delete().eq('id', editing.id),
-      '経費の削除',
-    )
-    setDeleting(false)
+    if (!cancelReason.trim()) return alert('取り消す理由を入力してください')
+    setCancelling(true)
+    const { ok } = await cancelRow('expenses', editing.id, cancelReason.trim(), cancelBy.trim(), '経費の取り消し')
+    setCancelling(false)
     if (!ok) return
+    setCancelReason('')
+    setCancelBy('')
     closeForm()
     await reload()
   }
 
+  // 取り消しを取り消す（元に戻す）。deleted_at を NULL に戻すだけ。
+  async function restore(e) {
+    setRestoringId(e.id)
+    const { ok } = await restoreRow('expenses', e.id, '経費の取り消しを元に戻す')
+    setRestoringId(null)
+    if (!ok) return
+    await reload()
+  }
+
+  const cancelledCount = (allExpenses || []).filter(isCancelled).length
+  // 一覧に出す行。合計は常に有効な行だけで計算する。
+  const visible = showCancelled ? (allExpenses || expenses) : expenses
+
   const months = {}
-  expenses.forEach((e) => {
+  visible.forEach((e) => {
     const m = (e.expense_date || '').slice(0, 7) || '不明'
     if (!months[m]) months[m] = []
     months[m].push(e)
@@ -150,22 +171,37 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
         })}
       </div>
 
-      {expenses.length === 0 && <div className="empty">経費を登録してください</div>}
+      {/* 取り消し済みがある場合だけ、表示の切り替えを出す（普段は邪魔にならないように） */}
+      {cancelledCount > 0 && (
+        <div className="filter-row" style={{ marginTop: 10 }}>
+          <button
+            className={'filter-btn' + (showCancelled ? ' active' : '')}
+            onClick={() => setShowCancelled((v) => !v)}
+          >
+            取消済みも表示({cancelledCount})
+          </button>
+        </div>
+      )}
+
+      {expenses.length === 0 && !showCancelled && <div className="empty">経費を登録してください</div>}
       {monthKeys.map((m) => {
-        const total = months[m].reduce((s, e) => s + (e.amount || 0), 0)
+        // 合計は有効な行だけ。取り消した分は金額に入れない。
+        const total = months[m].filter((e) => !isCancelled(e)).reduce((s, e) => s + (e.amount || 0), 0)
         return (
           <div key={m}>
             <div className="month-header">{m.replace('-', '年')}月　合計 {fmt(total)}</div>
             {months[m].map((e) => {
               const cat = getCat(e.category)
+              const off = isCancelled(e)
               return (
-                <div className="card" key={e.id}>
+                <div className={'card' + (off ? ' cancelled-card' : '')} key={e.id}>
                   <div className="row-between">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 18 }}>{cat.icon}</span>
                       <span className="category-badge">{cat.label}</span>
                       {e.is_recurring && <span className="recurring-badge">毎月</span>}
                       {e.recurring_expense_id && <span className="auto-badge">自動計上</span>}
+                      {off && <span className="cancelled-badge">取消済み</span>}
                     </div>
                     <span className="item-sub">{e.expense_date}</span>
                   </div>
@@ -176,9 +212,22 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
                     </div>
                   )}
                   {e.note && <div className="item-name" style={{ marginTop: 6 }}>{e.note}</div>}
+                  {off && (
+                    <div className="item-sub" style={{ marginTop: 6 }}>
+                      🚫 {cancelLabel(e)}<br />
+                      理由: {e.deleted_reason || '（記録なし）'}<br />
+                      この行は合計に入っていません。
+                    </div>
+                  )}
                   <div className="row-between" style={{ marginTop: 6 }}>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: '#2f4858' }}>{fmt(e.amount)}</div>
-                    <button className="edit-btn" onClick={() => openEdit(e)}>編集</button>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: off ? '#999' : '#2f4858', textDecoration: off ? 'line-through' : 'none' }}>{fmt(e.amount)}</div>
+                    {off ? (
+                      <button className="edit-btn" disabled={restoringId === e.id} onClick={() => restore(e)}>
+                        {restoringId === e.id ? '戻しています...' : '元に戻す'}
+                      </button>
+                    ) : (
+                      <button className="edit-btn" onClick={() => openEdit(e)}>編集</button>
+                    )}
                   </div>
                 </div>
               )
@@ -187,35 +236,50 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
         )
       })}
 
-      {/* 削除の確認画面。取り消せないので、何を消すのかを並べて見せてから実行する */}
-      {formOpen && confirmingDelete && editing && (
-        <Modal title="この経費記録を削除しますか？" onClose={() => setConfirmingDelete(false)}>
+      {/* 取り消しの確認画面。記録自体は残るが、集計から外れるので内容を見せてから実行する */}
+      {formOpen && confirmingCancel && editing && (
+        <Modal title="この経費記録を取り消しますか？" onClose={() => setConfirmingCancel(false)}>
           <div className="calc-box" style={{ marginTop: 0 }}>
             <div className="item-sub">日付: <b>{editing.expense_date}</b></div>
             <div className="item-sub">費目: <b>{getCat(editing.category).icon} {getCat(editing.category).label}</b></div>
             <div className="item-sub">メモ: <b>{editing.note || '（なし）'}</b></div>
             <div className="calc-result" style={{ marginTop: 6 }}>{fmt(editing.amount)}</div>
           </div>
-          <div className="item-sub" style={{ marginTop: 12, color: '#c0392b', fontWeight: 700 }}>
-            ⚠️ この操作は取り消せません
+          <div className="item-sub" style={{ marginTop: 12 }}>
+            取り消すと、この記録は<b>合計から外れます</b>。記録そのものは消えずに残り、
+            「取消済みも表示」から<b>いつでも元に戻せます</b>。
           </div>
+          <label className="field-label">取り消す理由 *</label>
+          <input
+            className="field-input"
+            value={cancelReason}
+            onChange={(ev) => setCancelReason(ev.target.value)}
+            placeholder="例: 二重に登録してしまったため"
+          />
+          <label className="field-label">取り消した人</label>
+          <input
+            className="field-input"
+            value={cancelBy}
+            onChange={(ev) => setCancelBy(ev.target.value)}
+            placeholder="例: トモ"
+          />
           {editing.recurring_expense_id && (
             <div className="item-sub" style={{ marginTop: 10 }}>
-              この記録は定期経費テンプレートから<b>自動計上</b>されたものです。削除しても、
+              この記録は定期経費テンプレートから<b>自動計上</b>されたものです。取り消しても、
               テンプレート側の計上済みの月の記録は変わらないため、<b>同じ月が自動で計上し直されることはありません</b>。
               この月の分を改めて残したい場合は、手入力で登録してください。
             </div>
           )}
-          <button className="danger-btn" disabled={deleting} onClick={remove}>
-            {deleting ? '削除中...' : '削除する'}
+          <button className="danger-btn" disabled={cancelling} onClick={cancelRecord}>
+            {cancelling ? '取り消しています...' : '取り消す'}
           </button>
-          <button className="cancel-btn" disabled={deleting} onClick={() => setConfirmingDelete(false)}>
+          <button className="cancel-btn" disabled={cancelling} onClick={() => setConfirmingCancel(false)}>
             やめる
           </button>
         </Modal>
       )}
 
-      {formOpen && !confirmingDelete && (
+      {formOpen && !confirmingCancel && (
         <Modal title={editing ? '経費編集' : '経費登録'} onClose={closeForm}>
           {(editing?.photo_url || photoPreview) && <img src={photoPreview || editing.photo_url} className="photo-preview" style={{ display: 'block' }} />}
           <label className="field-label">カテゴリ *</label>
@@ -245,10 +309,10 @@ export default function Expenses({ expenses, recurring, recurringError, reload }
             </div>
           )}
           <button className="save-btn" disabled={saving} onClick={save}>{saving ? '保存中...' : editing ? '保存する' : '登録する'}</button>
-          {/* 登録時には出さない。既にある記録を消すときだけ */}
+          {/* 登録時には出さない。既にある記録を取り消すときだけ */}
           {editing && (
-            <button className="delete-btn" disabled={saving} onClick={() => setConfirmingDelete(true)}>
-              この記録を削除する
+            <button className="delete-btn" disabled={saving} onClick={() => setConfirmingCancel(true)}>
+              この記録を取り消す
             </button>
           )}
         </Modal>
