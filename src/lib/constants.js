@@ -53,3 +53,32 @@ export function agingLevel(days) {
   if (days >= AGING_WARN_DAYS) return 'warn'
   return 'ok'
 }
+
+// 発送の配送業者。shipments.carrier の内部値。
+export const CARRIERS = [
+  { value: 'yamato', label: 'ヤマト運輸', icon: '🐈' },
+  { value: 'japanpost', label: '日本郵便', icon: '📮' },
+  { value: 'sagawa', label: '佐川急便', icon: '🚚' },
+  { value: 'other', label: 'その他', icon: '📦' },
+]
+
+export const carrierLabel = (value) => (CARRIERS.find((c) => c.value === value) || {}).label || value || ''
+
+// 発送方法。shipments.method の内部値。carrier は参考値で、
+// 「らくらくメルカリ便＝ヤマト」のような既定の対応づけを入力時の初期値に使う。
+export const SHIP_METHODS = [
+  { value: 'rakuraku', label: 'らくらくメルカリ便', carrier: 'yamato' },
+  { value: 'nekoposu', label: 'ネコポス', carrier: 'yamato' },
+  { value: 'compact', label: '宅急便コンパクト', carrier: 'yamato' },
+  { value: 'takkyubin', label: '宅急便', carrier: 'yamato' },
+  { value: 'yuyu', label: 'ゆうゆうメルカリ便', carrier: 'japanpost' },
+  { value: 'yupacket', label: 'ゆうパケット', carrier: 'japanpost' },
+  { value: 'yupacket_post', label: 'ゆうパケットポスト', carrier: 'japanpost' },
+  { value: 'yupack', label: 'ゆうパック', carrier: 'japanpost' },
+  { value: 'other', label: 'その他', carrier: null },
+]
+
+export const shipMethodLabel = (value) => (SHIP_METHODS.find((m) => m.value === value) || {}).label || value || ''
+
+/** 発送方法から既定の配送業者を引く（未知の方法なら null） */
+export const carrierForMethod = (method) => (SHIP_METHODS.find((m) => m.value === method) || {}).carrier || null
