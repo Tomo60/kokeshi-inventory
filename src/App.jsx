@@ -57,7 +57,12 @@ export default function App() {
       const [i, s, p, c, e, r, sh, b] = await Promise.all([
         fetchTable(() => supabase.from('items').select('*').order('created_at', { ascending: false })),
         fetchTable(() => supabase.from('sales').select('*').order('sold_at', { ascending: false })),
-        fetchTable(() => supabase.from('purchases').select('*').order('created_at', { ascending: false })),
+        // 仕入は「購入日」の新しい順で並べる。登録した順（created_at）だと、
+        // あとから登録した古い取引が先頭に来てしまい、帳簿として追いにくいため。
+        // 同じ日の中は id の新しい順（＝その日に後から登録したものが上）。
+        fetchTable(() => supabase.from('purchases').select('*')
+          .order('purchase_date', { ascending: false })
+          .order('id', { ascending: false })),
         fetchTable(() => supabase.from('customers').select('*').order('created_at', { ascending: false })),
         fetchTable(() => supabase.from('expenses').select('*').order('expense_date', { ascending: false })),
         fetchTable(() => supabase.from('recurring_expenses').select('*').order('day_of_month', { ascending: true })),
