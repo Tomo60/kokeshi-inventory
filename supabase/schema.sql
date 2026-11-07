@@ -64,6 +64,15 @@ create table if not exists purchases (
   created_at timestamptz not null default now()
 );
 
+-- Existing installs: 取消フラグ（論理削除）の列。
+-- deleted_at が NULL なら有効な行。NULL でなければ「取り消し済み」で、
+-- アプリの一覧・集計からは外れる。行は決して消さない。
+-- 詳細と ロールバックSQL は supabase/migrations/20261107_add_cancel_flag.sql を参照。
+alter table purchases add column if not exists deleted_at     timestamptz;
+alter table purchases add column if not exists deleted_reason text;
+alter table purchases add column if not exists deleted_by     text;
+create index if not exists purchases_active_idx on purchases (purchase_date desc) where deleted_at is null;
+
 create table if not exists purchase_items (
   id bigint generated always as identity primary key,
   purchase_id bigint references purchases(id) on delete cascade,
@@ -83,6 +92,12 @@ create table if not exists expenses (
   created_at timestamptz not null default now()
   -- recurring_expense_id は recurring_expenses 作成後に下の alter table で追加する
 );
+
+-- Existing installs: expenses にも同じ取消フラグを足す（経費タブの「削除」を論理削除に変えたため）。
+alter table expenses add column if not exists deleted_at     timestamptz;
+alter table expenses add column if not exists deleted_reason text;
+alter table expenses add column if not exists deleted_by     text;
+create index if not exists expenses_active_idx on expenses (expense_date desc) where deleted_at is null;
 
 -- 定期経費テンプレート（家賃など毎月同日に発生する固定費の定義）。
 -- 実績は expenses に自動生成され、このテーブルは「何を・いくら・毎月何日に計上するか」だけを保持する。

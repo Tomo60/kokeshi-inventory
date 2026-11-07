@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase, isConfigured } from './lib/supabase'
 import { withRetry, describeError } from './lib/retry'
+import { activeOnly } from './lib/cancel'
 import { generateRecurringExpenses } from './lib/recurringExpenses'
 import Dashboard from './components/Dashboard'
 import Items from './components/Items'
@@ -104,7 +105,21 @@ export default function App() {
       .then(() => reload())
   }, [reload])
 
-  const shared = { items, sales, purchases, customers, expenses, recurring, recurringError, shipments, shipmentsError, businessInfo, businessInfoError, reload }
+  // 取り消し済み（deleted_at あり）の行は、画面と集計から外して渡す。
+  // 既定の purchases / expenses を「有効な行だけ」にしてあるので、
+  // ダッシュボードなどの集計は何も変えなくても取り消し分が入らない。
+  // 取り消し済みも見せたい画面（仕入・経費）には all... を別に渡す。
+  const activePurchases = activeOnly(purchases)
+  const activeExpenses = activeOnly(expenses)
+
+  const shared = {
+    items, sales, customers, recurring, recurringError,
+    shipments, shipmentsError, businessInfo, businessInfoError, reload,
+    purchases: activePurchases,
+    expenses: activeExpenses,
+    allPurchases: purchases,
+    allExpenses: expenses,
+  }
 
   return (
     <>

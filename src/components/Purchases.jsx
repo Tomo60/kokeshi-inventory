@@ -3,6 +3,7 @@ import { supabase, uploadPhoto } from '../lib/supabase'
 import { saveWithRetry } from '../lib/retry'
 import { fmt, today } from '../lib/format'
 import { CONDITIONS } from '../lib/constants'
+import { isCancelled, cancelLabel, cancelRow, restoreRow } from '../lib/cancel'
 import Modal from './Modal'
 
 // 分類ルール: このテーブルは「販売する商品そのものの仕入」専用。
@@ -30,7 +31,9 @@ function avgOf(form) {
   return qty > 0 ? Math.round(total / qty) : 0
 }
 
-export default function Purchases({ purchases, reload }) {
+// purchases は有効な行だけ（App.jsx で取り消し済みを除いて渡している）。
+// allPurchases は取り消し済みも含む全行で、「取消済みも表示」のときだけ使う。
+export default function Purchases({ purchases, allPurchases, reload }) {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -38,6 +41,13 @@ export default function Purchases({ purchases, reload }) {
   const [photoPreview, setPhotoPreview] = useState(null)
   const [saving, setSaving] = useState(false)
   const [linking, setLinking] = useState(null)
+  // 取り消し（論理削除）まわり。行は消さず、合計から外すだけ。
+  const [confirmingCancel, setConfirmingCancel] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelBy, setCancelBy] = useState('')
+  const [showCancelled, setShowCancelled] = useState(false)
+  const [restoringId, setRestoringId] = useState(null)
   const [itemForm, setItemForm] = useState(emptyItemForm)
   const [itemPhotoFile, setItemPhotoFile] = useState(null)
   const [itemPhotoPreview, setItemPhotoPreview] = useState(null)
@@ -47,6 +57,7 @@ export default function Purchases({ purchases, reload }) {
     setForm(emptyForm)
     setPhotoFile(null)
     setPhotoPreview(null)
+    setConfirmingCancel(false)
     setFormOpen(true)
   }
   function openEdit(p) {
@@ -54,7 +65,32 @@ export default function Purchases({ purchases, reload }) {
     setForm({ ...emptyForm, ...p })
     setPhotoFile(null)
     setPhotoPreview(null)
+    setConfirmingCancel(false)
     setFormOpen(true)
+  }
+
+  // 行は消さずに取り消しフラグを立てる（論理削除）。確認画面を経たうえでのみ呼ばれる。
+  async function cancelRecord() {
+    if (!editing) return
+    if (!cancelReason.trim()) return alert('取り消す理由を入力してください')
+    setCancelling(true)
+    const { ok } = await cancelRow('purchases', editing.id, cancelReason.trim(), cancelBy.trim(), '仕入記録の取り消し')
+    setCancelling(false)
+    if (!ok) return
+    setCancelReason('')
+    setCancelBy('')
+    setConfirmingCancel(false)
+    setFormOpen(false)
+    await reload()
+  }
+
+  // 取り消しを取り消す（元に戻す）。deleted_at を NULL に戻すだけ。
+  async function restore(p) {
+    setRestoringId(p.id)
+    const { ok } = await restoreRow('purchases', p.id, '仕入記録の取り消しを元に戻す')
+    setRestoringId(null)
+    if (!ok) return
+    await reload()
   }
 
   function onPhotoChange(e) {
@@ -148,9 +184,13 @@ export default function Purchases({ purchases, reload }) {
     alert('在庫に追加しました')
   }
 
+  // サマリーは常に有効な行だけ。取り消した分は金額にも点数にも入れない。
   const totalAmount = purchases.reduce((s, p) => s + (p.total_amount || 0), 0)
   const totalItems = purchases.reduce((s, p) => s + (p.quantity || 0), 0)
   const avgAmount = totalItems > 0 ? Math.round(totalAmount / totalItems) : 0
+
+  const cancelledCount = (allPurchases || []).filter(isCancelled).length
+  const visible = showCancelled ? (allPurchases || purchases) : purchases
 
   return (
     <>
@@ -166,29 +206,99 @@ export default function Purchases({ purchases, reload }) {
         <h2 className="section-title" style={{ margin: 0 }}>仕入記録</h2>
         <button className="add-btn" onClick={openAdd}>+ 仕入登録</button>
       </div>
-      {purchases.length === 0 && <div className="empty">仕入れを登録してください</div>}
-      {purchases.map((p) => {
+      {/* 取り消し済みがある場合だけ、表示の切り替えを出す（普段は邪魔にならないように） */}
+      {cancelledCount > 0 && (
+        <div className="filter-row" style={{ marginTop: 10 }}>
+          <button
+            className={'filter-btn' + (showCancelled ? ' active' : '')}
+            onClick={() => setShowCancelled((v) => !v)}
+          >
+            取消済みも表示({cancelledCount})
+          </button>
+        </div>
+      )}
+
+      {purchases.length === 0 && !showCancelled && <div className="empty">仕入れを登録してください</div>}
+      {visible.map((p) => {
         const sourceLabel = (SOURCE_TYPES.find((s) => s.value === p.source_type) || {}).label || p.source_type
+        const off = isCancelled(p)
         return (
-          <div className="card" key={p.id}>
+          <div className={'card' + (off ? ' cancelled-card' : '')} key={p.id}>
             {p.photo_url && <img src={p.photo_url} className="photo-thumb" style={{ float: 'right', marginLeft: 10 }} onError={(e) => (e.target.style.display = 'none')} />}
-            <div className="row-between"><span className="category-badge">{sourceLabel}</span><span className="item-sub">{p.purchase_date}</span></div>
-            <div className="item-name" style={{ marginTop: 6 }}>{p.source}</div>
+            <div className="row-between">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span className="category-badge">{sourceLabel}</span>
+                {off && <span className="cancelled-badge">取消済み</span>}
+              </div>
+              <span className="item-sub">{p.purchase_date}</span>
+            </div>
+            <div className="item-name" style={{ marginTop: 6, textDecoration: off ? 'line-through' : 'none', color: off ? '#999' : undefined }}>{p.source}</div>
             <div className="price-row">
               <span className="price-tag">合計 {fmt(p.total_amount)}</span>
               <span className="price-tag">{p.quantity}点</span>
-              <span className="price-tag" style={{ color: '#2f4858', fontWeight: 700 }}>平均 {fmt(p.avg_amount)}/点</span>
+              <span className="price-tag" style={{ color: off ? '#999' : '#2f4858', fontWeight: 700 }}>平均 {fmt(p.avg_amount)}/点</span>
             </div>
             {p.note && <div className="item-sub">📝 {p.note}</div>}
+            {off && (
+              <div className="item-sub" style={{ marginTop: 6 }}>
+                🚫 {cancelLabel(p)}<br />
+                理由: {p.deleted_reason || '（記録なし）'}<br />
+                この行は仕入サマリーの合計・点数に入っていません。
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', clear: 'both' }}>
-              <button className="edit-btn" onClick={() => openEdit(p)}>編集</button>
-              <button className="link-btn" onClick={() => openLink(p)}>在庫に追加</button>
+              {off ? (
+                <button className="edit-btn" disabled={restoringId === p.id} onClick={() => restore(p)}>
+                  {restoringId === p.id ? '戻しています...' : '元に戻す'}
+                </button>
+              ) : (
+                <>
+                  <button className="edit-btn" onClick={() => openEdit(p)}>編集</button>
+                  <button className="link-btn" onClick={() => openLink(p)}>在庫に追加</button>
+                </>
+              )}
             </div>
           </div>
         )
       })}
 
-      {formOpen && (
+      {/* 取り消しの確認画面。記録自体は残るが、合計から外れるので内容を見せてから実行する */}
+      {formOpen && confirmingCancel && editing && (
+        <Modal title="この仕入記録を取り消しますか？" onClose={() => setConfirmingCancel(false)}>
+          <div className="calc-box" style={{ marginTop: 0 }}>
+            <div className="item-sub">仕入日: <b>{editing.purchase_date}</b></div>
+            <div className="item-sub">仕入先: <b>{editing.source || '（なし）'}</b></div>
+            <div className="item-sub">メモ: <b>{editing.note || '（なし）'}</b></div>
+            <div className="calc-result" style={{ marginTop: 6 }}>{fmt(editing.total_amount)} / {editing.quantity}点</div>
+          </div>
+          <div className="item-sub" style={{ marginTop: 12 }}>
+            取り消すと、この記録は<b>仕入サマリーの合計・点数から外れます</b>。記録そのものは消えずに残り、
+            「取消済みも表示」から<b>いつでも元に戻せます</b>。
+          </div>
+          <label className="field-label">取り消す理由 *</label>
+          <input
+            className="field-input"
+            value={cancelReason}
+            onChange={(ev) => setCancelReason(ev.target.value)}
+            placeholder="例: 二重に登録してしまったため"
+          />
+          <label className="field-label">取り消した人</label>
+          <input
+            className="field-input"
+            value={cancelBy}
+            onChange={(ev) => setCancelBy(ev.target.value)}
+            placeholder="例: トモ"
+          />
+          <button className="danger-btn" disabled={cancelling} onClick={cancelRecord}>
+            {cancelling ? '取り消しています...' : '取り消す'}
+          </button>
+          <button className="cancel-btn" disabled={cancelling} onClick={() => setConfirmingCancel(false)}>
+            やめる
+          </button>
+        </Modal>
+      )}
+
+      {formOpen && !confirmingCancel && (
         <Modal title={editing ? '仕入編集' : '仕入登録'} onClose={() => setFormOpen(false)}>
           {(editing?.photo_url || photoPreview) && <img src={photoPreview || editing.photo_url} className="photo-preview" style={{ display: 'block' }} />}
           <label className="field-label">仕入先種別 *</label>
@@ -210,6 +320,12 @@ export default function Purchases({ purchases, reload }) {
           <div className="photo-upload" onClick={() => document.getElementById('purchase-photo-input').click()}>📷 タップして写真を選択</div>
           <input id="purchase-photo-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={onPhotoChange} />
           <button className="save-btn" disabled={saving} onClick={save}>{saving ? '保存中...' : editing ? '保存する' : '登録する'}</button>
+          {/* 登録時には出さない。既にある記録を取り消すときだけ */}
+          {editing && (
+            <button className="delete-btn" disabled={saving} onClick={() => setConfirmingCancel(true)}>
+              この記録を取り消す
+            </button>
+          )}
         </Modal>
       )}
 
