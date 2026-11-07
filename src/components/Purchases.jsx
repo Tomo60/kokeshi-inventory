@@ -25,6 +25,12 @@ const emptyItemForm = {
   note: '',
 }
 
+// 「2026-10-17」→「2026年10月17日」。読めない値はそのまま出す。
+function formatDay(d) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || '')
+  return m ? `${m[1]}年${Number(m[2])}月${Number(m[3])}日` : (d || '日付なし')
+}
+
 function avgOf(form) {
   const total = +form.total_amount || 0
   const qty = +form.quantity || 0
@@ -192,6 +198,16 @@ export default function Purchases({ purchases, allPurchases, reload }) {
   const cancelledCount = (allPurchases || []).filter(isCancelled).length
   const visible = showCancelled ? (allPurchases || purchases) : purchases
 
+  // 購入日ごとにまとめる。App.jsx が購入日の新しい順で取ってくるので、
+  // 最初に出てきた順にキーを積むだけで、見出しも新しい日付から並ぶ。
+  const days = {}
+  const dayKeys = []
+  visible.forEach((p) => {
+    const d = p.purchase_date || '日付なし'
+    if (!days[d]) { days[d] = []; dayKeys.push(d) }
+    days[d].push(p)
+  })
+
   return (
     <>
       <h2 className="section-title">仕入サマリー</h2>
@@ -219,7 +235,17 @@ export default function Purchases({ purchases, allPurchases, reload }) {
       )}
 
       {purchases.length === 0 && !showCancelled && <div className="empty">仕入れを登録してください</div>}
-      {visible.map((p) => {
+      {dayKeys.map((d) => {
+      // 見出しの件数・点数・金額は有効な行だけ。取り消した分は数えない。
+      const active = days[d].filter((p) => !isCancelled(p))
+      const dayAmount = active.reduce((s, p) => s + (p.total_amount || 0), 0)
+      const dayQty = active.reduce((s, p) => s + (p.quantity || 0), 0)
+      return (
+        <div key={d}>
+          <div className="month-header">
+            {formatDay(d)}　{active.length}件・{dayQty}点・{fmt(dayAmount)}
+          </div>
+          {days[d].map((p) => {
         const sourceLabel = (SOURCE_TYPES.find((s) => s.value === p.source_type) || {}).label || p.source_type
         const off = isCancelled(p)
         return (
@@ -260,6 +286,9 @@ export default function Purchases({ purchases, allPurchases, reload }) {
             </div>
           </div>
         )
+          })}
+        </div>
+      )
       })}
 
       {/* 取り消しの確認画面。記録自体は残るが、合計から外れるので内容を見せてから実行する */}
