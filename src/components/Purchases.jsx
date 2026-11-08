@@ -18,7 +18,22 @@ const SOURCE_TYPES = [
   { value: 'other', label: 'その他' },
 ]
 
-const emptyForm = { source_type: 'market', source: '', purchase_date: today(), total_amount: '', quantity: '', note: '' }
+// フォームが扱う項目。ここに無い列は save() でも書かないので、
+// needs_review や取り消しフラグ（deleted_at など）は編集・保存しても touch されない。
+const emptyForm = {
+  source_type: 'market', source: '', purchase_date: today(),
+  total_amount: '', quantity: '', note: '',
+  // アカウント（トモ / ゆゆ♥ など）。既定は空欄。
+  // 店舗仕入れやフリマには「どのアカウントで買ったか」という概念がないため、
+  // 既定値を入れてしまうと誤ったアカウントが静かに付いてアカウント別集計が狂う。
+  channel_account: '',
+  // 以下はいずれも purchases に既にある列。マイグレーションは不要。
+  external_order_no: '', point_used: '', coupon_used: '', payment_method: '',
+}
+
+// アカウントの選択肢で「新しいアカウントを手入力する」を選んだときの値。
+// 実際のアカウント名と衝突しない値にしておく。
+const NEW_ACCOUNT = '\u0000new'
 const emptyItemForm = {
   category: '', source_place: '', name: '', buy_price: '', sell_price: '',
   purchase_date: today(), storage_location: '', lot_number: '', condition: '', expected_sell_by: '',
@@ -36,6 +51,9 @@ function avgOf(form) {
   const qty = +form.quantity || 0
   return qty > 0 ? Math.round(total / qty) : 0
 }
+
+// DBから読んだ値は null のことがあるので、文字列にしてから前後の空白を落とす。
+const trimmed = (v) => String(v ?? '').trim()
 
 // purchases は有効な行だけ（App.jsx で取り消し済みを除いて渡している）。
 // allPurchases は取り消し済みも含む全行で、「取消済みも表示」のときだけ使う。
@@ -57,6 +75,17 @@ export default function Purchases({ purchases, allPurchases, reload }) {
   const [itemForm, setItemForm] = useState(emptyItemForm)
   const [itemPhotoFile, setItemPhotoFile] = useState(null)
   const [itemPhotoPreview, setItemPhotoPreview] = useState(null)
+  // アカウントを選択肢から選ぶか、新しい名前を手入力するか。
+  const [newAccount, setNewAccount] = useState(false)
+
+  // これまでに使われたアカウント名を、既存データからそのまま拾って選択肢にする。
+  // 手で打たせないのが要点。「ゆゆ♥」のハート（U+2665）を打ち直すと
+  // 見た目がそっくりな別の字（♡ U+2661 など）になり、別アカウント扱いで集計が割れる。
+  // 取り消し済みの行も候補に含めるため allPurchases を優先して見る。
+  const accountSource = allPurchases || purchases
+  const knownAccounts = [...new Set((accountSource || []).map((p) => p.channel_account).filter(Boolean))].sort()
+  // 支払方法も同じ考え方で、入力済みの値を候補に出して表記ゆれを防ぐ。
+  const knownMethods = [...new Set((accountSource || []).map((p) => p.payment_method).filter(Boolean))].sort()
 
   function openAdd() {
     setEditing(null)
@@ -64,6 +93,7 @@ export default function Purchases({ purchases, allPurchases, reload }) {
     setPhotoFile(null)
     setPhotoPreview(null)
     setConfirmingCancel(false)
+    setNewAccount(false)
     setFormOpen(true)
   }
   function openEdit(p) {
@@ -72,6 +102,9 @@ export default function Purchases({ purchases, allPurchases, reload }) {
     setPhotoFile(null)
     setPhotoPreview(null)
     setConfirmingCancel(false)
+    // 既存のアカウントは必ず候補に含まれる（候補は既存データから作っているため）ので、
+    // 編集を開いた時点では手入力モードにしない。
+    setNewAccount(false)
     setFormOpen(true)
   }
 
@@ -118,6 +151,9 @@ export default function Purchases({ purchases, allPurchases, reload }) {
       const url = await uploadPhoto(photoFile, 'purchase')
       if (url) photo_url = url
     }
+    // 書き込む列はここに挙げたものだけ。編集のときも同じなので、
+    // ここに無い列（needs_review、deleted_at / deleted_reason / deleted_by、created_at）は
+    // 編集・保存しても一切変わらない。
     const row = {
       source_type: form.source_type,
       source: form.source || null,
@@ -127,6 +163,14 @@ export default function Purchases({ purchases, allPurchases, reload }) {
       avg_amount: avgOf(form),
       note: form.note || null,
       photo_url,
+      // 空欄は NULL にする（「未設定」と「空文字」が混ざらないように）。
+      channel_account: trimmed(form.channel_account) || null,
+      external_order_no: trimmed(form.external_order_no) || null,
+      payment_method: trimmed(form.payment_method) || null,
+      // point_used / coupon_used は NOT NULL の列なので、空欄は 0 にする。
+      // ポイントとクーポンは商品代金から引かない方針なので、合計仕入額には影響しない。
+      point_used: +form.point_used || 0,
+      coupon_used: +form.coupon_used || 0,
     }
     const { ok } = await saveWithRetry(
       () => (editing
@@ -336,6 +380,42 @@ export default function Purchases({ purchases, allPurchases, reload }) {
           </select>
           <label className="field-label">仕入先名</label>
           <input className="field-input" value={form.source || ''} onChange={(e) => setForm({ ...form, source: e.target.value })} placeholder="例: ○○市 / 出品者名など" />
+
+          {/* アカウント。候補は既存データから作るので、「ゆゆ♥」を打ち直さずに選べる。
+              既定は「（未設定）」。店舗仕入れやフリマには付けないため。 */}
+          <label className="field-label">アカウント（どのアカウントで買ったか）</label>
+          <select
+            className="field-input"
+            value={newAccount ? NEW_ACCOUNT : (form.channel_account || '')}
+            onChange={(e) => {
+              const v = e.target.value
+              if (v === NEW_ACCOUNT) {
+                setNewAccount(true)
+                setForm({ ...form, channel_account: '' })
+              } else {
+                setNewAccount(false)
+                setForm({ ...form, channel_account: v })
+              }
+            }}
+          >
+            <option value="">（未設定）</option>
+            {knownAccounts.map((a) => <option key={a} value={a}>{a}</option>)}
+            <option value={NEW_ACCOUNT}>＋ 新しいアカウントを入力...</option>
+          </select>
+          {newAccount && (
+            <input
+              className="field-input"
+              style={{ marginTop: 6 }}
+              value={form.channel_account || ''}
+              onChange={(e) => setForm({ ...form, channel_account: e.target.value })}
+              placeholder="新しいアカウント名"
+              autoFocus
+            />
+          )}
+          <div className="item-sub">
+            店舗やフリマでの仕入れは「（未設定）」のままにしてください。
+          </div>
+
           <label className="field-label">仕入日 *</label>
           <input className="field-input" type="date" value={form.purchase_date} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} />
           <label className="field-label">合計仕入額(円) *</label>
@@ -343,8 +423,58 @@ export default function Purchases({ purchases, allPurchases, reload }) {
           <label className="field-label">仕入点数 *</label>
           <input className="field-input" type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} placeholder="例: 5" />
           <div className="calc-box"><div className="item-sub">自動計算</div><div className="calc-result">1点あたりの平均仕入値: {fmt(avgOf(form))}</div></div>
-          <label className="field-label">メモ</label>
-          <input className="field-input" value={form.note || ''} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+
+          {/* ポイント・クーポンは記録のためだけに持つ。商品代金からは引かないので
+              合計仕入額や平均仕入値には影響しない（方針）。 */}
+          <label className="field-label">ポイント利用(円)</label>
+          <input
+            className="field-input" type="number" min="0"
+            value={form.point_used ?? ''}
+            onChange={(e) => setForm({ ...form, point_used: e.target.value })}
+            placeholder="使っていなければ空欄 / 例: 400"
+          />
+          <label className="field-label">クーポン利用(円)</label>
+          <input
+            className="field-input" type="number" min="0"
+            value={form.coupon_used ?? ''}
+            onChange={(e) => setForm({ ...form, coupon_used: e.target.value })}
+            placeholder="使っていなければ空欄"
+          />
+          <div className="item-sub">
+            ポイント・クーポンは記録だけで、合計仕入額からは引きません。
+          </div>
+
+          <label className="field-label">支払方法</label>
+          <input
+            className="field-input"
+            list="purchase-method-options"
+            value={form.payment_method || ''}
+            onChange={(e) => setForm({ ...form, payment_method: e.target.value })}
+            placeholder={knownMethods.length ? '入力済みの候補から選択、または新規入力' : '例: メルカード / コンビニ支払い'}
+          />
+          <datalist id="purchase-method-options">
+            {knownMethods.map((m) => <option key={m} value={m} />)}
+          </datalist>
+
+          <label className="field-label">商品ID・取引ID</label>
+          <input
+            className="field-input"
+            value={form.external_order_no || ''}
+            onChange={(e) => setForm({ ...form, external_order_no: e.target.value })}
+            placeholder="例: m12345678901"
+          />
+
+          {/* 備考は長くなる（配送方法・送料・状態・経緯などを書くため）。
+              1行の入力欄だと全文が見えず、気づかないまま消してしまう恐れがあるので複数行にする。 */}
+          <label className="field-label">メモ（配送方法・送料・状態なども、ここに書いてください）</label>
+          <textarea
+            className="field-input"
+            rows={6}
+            value={form.note || ''}
+            onChange={(e) => setForm({ ...form, note: e.target.value })}
+          />
+          <div className="item-sub">{(form.note || '').length}文字</div>
+
           <label className="field-label">写真</label>
           <div className="photo-upload" onClick={() => document.getElementById('purchase-photo-input').click()}>📷 タップして写真を選択</div>
           <input id="purchase-photo-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={onPhotoChange} />
