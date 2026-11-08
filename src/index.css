@@ -88,3 +88,6 @@ body { background: #f6f3ee; }
 /* 取り消し済み（論理削除）の行。消さずに残しているので、薄く見せて区別する */
 .cancelled-card { opacity: 0.62; background: #fafafa; border-left: 3px solid #bbb; }
 .cancelled-badge { background: #eceff1; color: #777; border-radius: 10px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+
+/* メモなどの複数行入力。field-input と同じ見た目で、縦だけ伸ばせるようにする。 */
+textarea.field-input { min-height: 96px; line-height: 1.5; resize: vertical; }
