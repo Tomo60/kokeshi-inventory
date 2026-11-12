@@ -114,8 +114,35 @@ npm update @holiday-jp/holiday_jp
    npm run dev
    ```
 
+5. ログイン用のユーザーを作る（アプリはログインしないとデータを読みません）
+
+   Supabase のダッシュボードで **Authentication → Users → Add user** を開き、
+   **「Auto Confirm User」をオンにして** メールアドレスとパスワードを入力して作成します。
+   オンにしないと「Email not confirmed」でログインできません（確認メールの設定が別途必要になります）。
+   パスワードはこの画面で本人が入力するもので、どこにも控える必要はありません。
+   忘れた場合は同じ画面の該当ユーザーから再設定できます。
+
+6. **新規登録を禁止する（重要）**
+
+   **Authentication → Sign In / Providers → Email** の
+   **「Allow new users to sign up」を必ずオフ**にしてください。
+   オンのままだと、誰でも自分のアカウントを作れてしまい、ログインを通れるため、
+   次の手順7でRLSを有効にしても保護になりません。
+
+7. RLS（ログインした人だけ読み書きできる設定）を有効にする
+
+   `supabase/rls/20261112_enable_rls_step1.sql` を SQL Editor で実行します。
+   **先に手順5のユーザーでログインできることを確かめてから実行してください。**
+   順番を逆にすると、アプリが全画面エラーになります。
+   元に戻すときは `supabase/rls/20261112_rollback_rls_step1.sql` を実行します。
+
 ## デプロイ
 
 Vercel等の静的ホスティングに `npm run build` の出力（`dist/`）をデプロイしてください。環境変数（`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`）をホスティング先にも設定する必要があります。
 
-> 個人利用を想定し、認証なし・Supabase anon keyをフロントエンドに含める構成です。複数人で使う、または公開環境に置く場合はSupabaseのRow Level Securityと認証の追加を検討してください。
+> Supabase の anon key はビルド時にJSへ埋め込まれるため、秘密にはできません（サイトを開けば誰でも読めます）。
+> そのため**保護はログイン（Supabase Auth）とRLSで行います**。セットアップの手順5〜7を必ず行ってください。
+>
+> 現時点で残っている穴（第2段で対応予定）: Storage のバケット `mingay-photos` が公開設定のため、
+> **仕入・発送の写真はURLを知っていれば鍵なしで誰でも見られます**。
+> 写真の非公開化（署名付きURLへの切り替え）は別途対応します。

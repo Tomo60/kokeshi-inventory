@@ -11,6 +11,7 @@ import Expenses from './components/Expenses'
 import Customers from './components/Customers'
 import Shipments from './components/Shipments'
 import Settings from './components/Settings'
+import Login from './components/Login'
 
 const TABS = [
   { key: 'dashboard', label: 'ダッシュボード', icon: '📊' },
@@ -25,6 +26,13 @@ const TABS = [
 
 export default function App() {
   const [tab, setTab] = useState('dashboard')
+  // ログイン状態。3つの値を区別する必要がある:
+  //   undefined … まだ確かめていない（保存されたセッションの復元待ち）
+  //   null      … ログインしていない
+  //   オブジェクト … ログイン済み
+  // undefined と null を一緒にすると、再読み込みの一瞬だけログイン画面が見えてしまう。
+  const [session, setSession] = useState(undefined)
+  const [signingOut, setSigningOut] = useState(false)
   const [items, setItems] = useState([])
   const [sales, setSales] = useState([])
   const [purchases, setPurchases] = useState([])
@@ -98,17 +106,68 @@ export default function App() {
     }
   }, [])
 
+  // 保存されたセッションの復元と、ログイン・ログアウトの監視。
+  // データの読み込みより先にこれを済ませる。順番が逆だと、RLSを有効にしたあとに
+  // 未ログインのまま読みに行って全件拒否になり、原因の分かりにくいエラーが出る。
+  useEffect(() => {
+    if (!isConfigured) {
+      setSession(null)
+      return
+    }
+    let alive = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (alive) setSession(data.session ?? null)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+      setSession(next ?? null)
+    })
+    return () => {
+      alive = false
+      sub.subscription.unsubscribe()
+    }
+  }, [])
+
+  // セッションの有無を、オブジェクトそのものではなく「確認済みか」と「誰か」の2つに分けて持つ。
+  // セッションは1時間ごとのトークン更新で別オブジェクトになるため、session をそのまま
+  // 下の依存配列に入れると、更新のたびに全テーブルを読み直してしまう。
+  const authChecked = session !== undefined
+  const userId = session?.user?.id ?? null
+
   useEffect(() => {
     if (!isConfigured) {
       setLoading(false)
       return
     }
+    // 復元を待っている間は「読み込み中」のままにする（ここで loading を false にすると
+    // 再読み込みのたびに一瞬ログイン画面が見えてしまう）。
+    if (!authChecked) return
+    if (!userId) {
+      // ログアウトした、またはセッションが切れた。画面に残っているデータを消しておく。
+      setItems([]); setSales([]); setPurchases([]); setCustomers([])
+      setExpenses([]); setRecurring([]); setShipments([]); setBusinessInfo(null)
+      setLoadError(null)
+      setLoading(false)
+      return
+    }
     // 起動時に、計上日を過ぎた当月分の定期経費を実績へ自動計上してから読み込む。
     // 失敗してもアプリは通常どおり使えるよう、generateRecurringExpenses 側で例外は握り潰している。
-    // ここが起動後の最初のリクエストになるため、再試行に入ったら画面にも知らせる。
+    // ここがログイン後の最初のリクエストになるため、再試行に入ったら画面にも知らせる。
+    setLoading(true)
     generateRecurringExpenses(undefined, undefined, { onRetry: () => setReconnecting(true) })
       .then(() => reload())
-  }, [reload])
+  }, [reload, authChecked, userId])
+
+  async function signOut() {
+    if (signingOut) return
+    setSigningOut(true)
+    const { error } = await supabase.auth.signOut()
+    // 失敗しても画面は残す（勝手に消えると、何が起きたか分からなくなる）。
+    if (error) {
+      console.error(error)
+      alert('ログアウトできませんでした: ' + (error.message || '原因不明'))
+    }
+    setSigningOut(false)
+  }
 
   // 取り消し済み（deleted_at あり）の行は、画面と集計から外して渡す。
   // 既定の purchases / expenses を「有効な行だけ」にしてあるので、
@@ -132,6 +191,14 @@ export default function App() {
       <div className="header">
         <span className="nav-icon">📦</span>
         <span className="header-title">Mingay</span>
+        {userId ? (
+          <>
+            <span className="header-spacer" />
+            <button className="logout-btn" onClick={signOut} disabled={signingOut}>
+              {signingOut ? '...' : 'ログアウト'}
+            </button>
+          </>
+        ) : null}
       </div>
       <div className="content">
         {!isConfigured ? (
@@ -144,6 +211,10 @@ export default function App() {
               テーブル作成手順は <code>supabase/schema.sql</code> と README を参照してください。
             </div>
           </div>
+        ) : !authChecked ? (
+          <div className="empty">読み込み中...</div>
+        ) : !userId ? (
+          <Login />
         ) : loading ? (
           <div className="empty">
             {reconnecting ? 'サーバーへの接続を再試行しています...' : '読み込み中...'}
@@ -167,7 +238,9 @@ export default function App() {
           </>
         )}
       </div>
-      <div className="nav">
+      {/* ログインしていないときは下のタブも出さない。
+          出したままだと、ログイン画面の裏でタブを切り替えられてしまう。 */}
+      <div className="nav" style={userId ? undefined : { display: 'none' }}>
         {TABS.map((t) => (
           <button
             key={t.key}
