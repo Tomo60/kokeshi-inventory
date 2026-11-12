@@ -215,47 +215,45 @@ create table if not exists business_info (
   updated_at timestamptz not null default now()
 );
 
--- Row Level Security: disabled by default for personal single-user use with the anon key.
--- Enable + add policies if you plan to expose this beyond a trusted personal device.
+-- ============================================================================
+-- Row Level Security（RLS）について
+-- ============================================================================
 --
--- 注意: RLSを有効にしただけでポリシーを作らないと、anon key からは
--- 読み取りも書き込みも一切できなくなる（全件拒否）。
--- Supabase のダッシュボードの Table Editor からテーブルを作ると RLS が既定で有効になるため、
--- このファイルを SQL Editor で実行せずに手作業でテーブルを追加すると、
--- そのテーブルだけアプリから見えない（= 常に0件・保存できない）状態になる。
--- 確認: select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r';
--- 個人利用のまま揃えるなら: alter table <table> disable row level security;
-
--- 実際に起きた事例の修正（2026-09-27 に本番へ適用済み）:
--- recurring_expenses だけ RLS が有効でポリシーが0件の状態になっており、
--- アプリからは常に0件・保存もできない（定期経費機能が一度も動作していない）状態だった。
--- このファイルで作ったテーブルは RLS が無効のままなので、その場合この文は何も変えない（冪等）。
-alter table recurring_expenses disable row level security;
-
--- shipments / business_info の RLS の扱い。
--- 「既存テーブルと同じ方針（= 無効）」と「ポリシーを必ず含める」の両方を満たすため、
--- ポリシーを先に作ってから RLS を無効にしている。意図は次の2点:
---   1. いまは既存7テーブルとまったく同じ挙動（anon key で読み書きできる）になる。
---   2. 将来 RLS を有効にしたときに、ポリシー0件で全件拒否になる事故（recurring_expenses で実際に起きた）が起きない。
--- create policy には if not exists が無いため、存在確認を挟んで何度実行しても安全にしている。
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'shipments' and policyname = 'shipments_anon_all'
-  ) then
-    create policy shipments_anon_all on shipments for all using (true) with check (true);
-  end if;
-end $$;
-alter table shipments disable row level security;
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public' and tablename = 'business_info' and policyname = 'business_info_anon_all'
-  ) then
-    create policy business_info_anon_all on business_info for all using (true) with check (true);
-  end if;
-end $$;
-alter table business_info disable row level security;
+-- ⚠️ このファイルは RLS の状態を変えません。意図的にそうしています。
+--
+-- RLS の設定は supabase/rls/ のスクリプトだけで管理します:
+--   ・supabase/rls/20261112_enable_rls_step1.sql   … 有効化（ログイン必須にする）
+--   ・supabase/rls/20261112_rollback_rls_step1.sql … 切り戻し
+--
+-- このファイルに `alter table ... enable/disable row level security` を書かないのは、
+-- schema.sql を再実行したときに保護が勝手に外れたり、逆にログイン機能が本番に
+-- 出る前に有効化されて全画面エラーになったりするのを防ぐためです。
+--
+-- 【新しくプロジェクトを作った場合】
+-- Postgres の既定どおり、create table したテーブルは RLS が無効です。つまり
+-- anon key を知っている人なら誰でも読み書きできる状態から始まります。
+-- anon key はブラウザ向けのJSバンドルに埋め込まれるため秘密にはできません。
+-- **自分だけの検証用でなければ、このファイルを流したあとに
+--   supabase/rls/20261112_enable_rls_step1.sql も必ず流してください。**
+-- アプリ側は src/components/Login.jsx のログインを通さないとデータを読みに行かない
+-- 作りになっているので、ログイン用のユーザーを Supabase の
+-- Authentication → Users から1つ作る必要があります（手順は README）。
+--
+-- 【過去にはまった点。消さずに残しています】
+-- ・RLS を有効にしただけでポリシーを作らないと、全件拒否になる。
+--   2026-09-27 に recurring_expenses だけこの状態になっており、定期経費機能が
+--   一度も動いていなかった（アプリからは常に0件・保存もできない）。
+--   そのため enable_rls_step1.sql は「ポリシーを作ってから有効にする」順序にしてある。
+-- ・Supabase ダッシュボードの Table Editor からテーブルを作ると RLS が既定で有効になる。
+--   このファイルを使わず手作業でテーブルを足すと、そのテーブルだけ挙動が変わる。
+-- ・shipments と business_info には以前 `..._anon_all`（誰にでも全部許可）という
+--   ポリシーがあった。将来 RLS を有効にしたときの全件拒否を避けるための保険だったが、
+--   残したまま RLS を有効にしても素通しになり保護にならないため、
+--   enable_rls_step1.sql で削除する。このファイルでも再作成しない。
+--
+-- 確認:
+--   select relname, relrowsecurity from pg_class
+--    where relnamespace = 'public'::regnamespace and relkind = 'r' order by relname;
+--   select schemaname, tablename, policyname, roles, cmd from pg_policies
+--    where schemaname = 'public' order by tablename;
+-- ============================================================================
