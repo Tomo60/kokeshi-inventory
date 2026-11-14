@@ -22,10 +22,13 @@ function Kpi({ label, value, color }) {
   )
 }
 
-function netProfit(sale, items) {
-  if (sale.net_profit != null) return sale.net_profit
-  const item = items.find((i) => i.id === sale.item_id) || {}
-  return (sale.sell_price || 0) - (item.buy_price || 0)
+// 利益は sales.net_profit だけを見る（経理決定 2026-11-12）。
+//   net_profit = 販売価格 − 仕入原価 − 手数料 − 広告費 − 送料
+// 以前は NULL のときに「売値 − 商品の仕入値」で代替していたが、その式は手数料・広告費・送料を
+// 無視するため、同じ「純利益」が画面によって違う意味になっていた。登録時に必ず保存する方式に
+// 統一したのでフォールバックは廃止した。マイグレーション適用後は not null。
+function netProfit(sale) {
+  return sale.net_profit || 0
 }
 
 function exportItemsCsv(items) {
@@ -46,7 +49,7 @@ function exportItemsCsv(items) {
 function exportSalesCsv(sales, items, customers) {
   const rows = [
     ['管理コード', '商品名', '顧客名', '販路', 'アカウント', '取引ID', 'ステータス', '集計対象',
-      '販売価格', '仕入値', '手数料率', '広告費率', '手数料実額', '広告費実額', '送料', '純利益',
+      '販売価格', '仕入原価', '手数料率', '広告費率', '手数料実額', '広告費実額', '送料', '純利益',
       '入金額', '入金日', '成約日', '要確認', 'メモ'],
     ...sales.map((s) => {
       const item = items.find((i) => i.id === s.item_id) || {}
@@ -55,8 +58,10 @@ function exportSalesCsv(sales, items, customers) {
         item.code || '', item.name || s.note || '不明', customer.name || '',
         platformLabel(s.platform || 'mercari'), s.channel_account || '', s.external_order_no || '',
         saleStatusLabel(s.sale_status || 'completed'), isCountedSale(s) ? '対象' : '対象外',
-        s.sell_price, item.buy_price || 0, s.fee_rate || 0, s.ad_rate || 0,
-        s.fee_amount ?? '', s.ad_amount ?? '', s.shipping_fee || 0, netProfit(s, items),
+        // 原価は売上行に保存した実額（sales.cost_amount）を出す。
+        // 商品の現在の仕入値（items.buy_price）ではなく、売ったときに使った原価が申告上の原価。
+        s.sell_price, s.cost_amount ?? '', s.fee_rate || 0, s.ad_rate || 0,
+        s.fee_amount ?? '', s.ad_amount ?? '', s.shipping_fee || 0, netProfit(s),
         s.payout_amount ?? '', s.payout_date || '', s.sold_at || '', s.needs_review ? '要確認' : '',
         s.note || '',
       ]
@@ -72,7 +77,7 @@ export default function Dashboard({ items, sales, purchases, expenses, customers
   // 返品・キャンセルは売上・利益の集計に含めない
   const countedSales = sales.filter(isCountedSale)
   const totalSell = countedSales.reduce((s, x) => s + (x.sell_price || 0), 0)
-  const totalNet = countedSales.reduce((s, x) => s + netProfit(x, items), 0)
+  const totalNet = countedSales.reduce((s, x) => s + netProfit(x), 0)
   const cm = thisMonth()
   const monthExpenses = expenses.filter((e) => (e.expense_date || '').startsWith(cm))
   const totalMonthExpense = monthExpenses.reduce((s, e) => s + (e.amount || 0), 0)
@@ -83,7 +88,7 @@ export default function Dashboard({ items, sales, purchases, expenses, customers
     if (!m) return
     if (!monthly[m]) monthly[m] = { revenue: 0, net: 0 }
     monthly[m].revenue += s.sell_price || 0
-    monthly[m].net += netProfit(s, items)
+    monthly[m].net += netProfit(s)
   })
   const months = Object.keys(monthly).sort().slice(-6)
   const labels = months.map((m) => m.replace('-', '/'))
