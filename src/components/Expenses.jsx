@@ -18,6 +18,10 @@ export const CATS = [
   // 毎月額が変わるので 'rent'（定額の家賃）とは分けて集計する。
   { value: 'utilities', label: '水道光熱費', icon: '💡' },
   { value: 'materials', label: '梱包材料費', icon: '📦' },
+  // 個別の売上に紐づく発送の送料は sales.shipping_fee に記録し、expenses の 'shipping' には入れない。
+  // expenses の 'shipping' は特定の売上に紐づかない送料関連費用（切手の一括購入など）に限定する。
+  // 両方に入れると二重計上になる（'materials' と同じ注意）。
+  // なお shipments.shipping_cost は物流記録側の送料で、損益計算には使わない。
   { value: 'shipping', label: '送料', icon: '🚚' },
   // 'platform_fee' は経費（手数料）カテゴリの内部値。
   // sales テーブルの platform 列（メルカリ等の販売チャネル区分）とは無関係な別物。

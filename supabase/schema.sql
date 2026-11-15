@@ -179,7 +179,9 @@ create table if not exists shipments (
   carrier text, -- 'yamato' | 'japanpost' | 'sagawa' | 'other'
   method text, -- 'rakuraku' | 'nekoposu' | 'compact' | 'takkyubin' | 'yuyu' | 'yupacket' | 'yupacket_post' | 'yupack' | 'other'
   tracking_no text, -- 追跡番号。API連携が無いため任意入力
-  shipping_cost numeric not null default 0, -- 送料（実額）
+  -- 送料（実額）。NULL=未入力 / 0=当社の負担なし（着払い・送料込み）/ 正の数=当社が払った額。
+  -- 以前は not null default 0 だったため「0円だったのか入れ忘れたのか」が区別できなかった。
+  shipping_cost numeric,
   recipient text, -- お届け先の名前
   destination text, -- お届け先（都道府県・市区町村など）
   note text,
@@ -194,6 +196,14 @@ create table if not exists shipments (
 -- 二重登録の主な原因になるため、業者を含めると弾けなくなるのを避けている。
 create unique index if not exists shipments_tracking_no_uniq
   on shipments (tracking_no) where tracking_no is not null;
+
+-- 既存のデータベース向け: shipping_cost の not null と既定値0を外す。
+-- 上の create table は新規作成時しか効かないため、ここで既存installにも同じ状態を作る。
+-- 既存の行の値は書き換えない（0 のまま残る）。何度実行しても同じ状態になる（冪等）。
+-- 「0 として入っている既存の行を、未入力(NULL)に直すかどうか」は行ごとの判断が必要なので、
+-- このファイルでは触らない（supabase/migrations/20261115_shipping_cost_nullable.sql のコメント参照）。
+alter table shipments alter column shipping_cost drop not null;
+alter table shipments alter column shipping_cost drop default;
 
 -- 事業情報（古物商許可の記録）。
 -- 古物営業法で定められた「許可証の番号・交付年月日・公安委員会」を帳簿側からも参照できるようにする。

@@ -8,6 +8,12 @@ import Modal from './Modal'
 // 発送伝票の記録画面。
 //
 // 設計の前提:
+// ・送料(shipping_cost)は「未入力」と「0円」を区別する。
+//     NULL   = 未入力（送料がいくらだったか分からない。着払いで額が不明な場合もここ）
+//     0      = 当社の負担なし（着払いで受取人が払った・送料込みで出品者が払った）
+//     正の数 = 当社が払った額
+//   以前は空欄を 0 として保存していたため、「本当に0円だったのか、入れ忘れたのか」が
+//   後から区別できなかった（登録済みの3件がすべて ¥0 になっていた）。
 // ・売上(sales)との紐付け(sale_id)は「任意」。発送した時点では取引が確定していない場合や、
 //   過去分の伝票を後からまとめて入力する場合があるため、未紐付けのまま保存して後で結び直せる。
 // ・1つの売上に対して複数回の発送（分割発送・再送）が起こりうるので、売上1:発送多の構造にしている。
@@ -104,7 +110,8 @@ export default function Shipments({ shipments, shipmentsError, sales, items, rel
       method: form.method || null,
       carrier: form.carrier || null,
       tracking_no: tracking || null,
-      shipping_cost: form.shipping_cost === '' ? 0 : +form.shipping_cost,
+      // 空欄は 0 ではなく NULL（未入力）として保存する。0 は明示的に入力されたときだけ入る。
+      shipping_cost: form.shipping_cost === '' ? null : +form.shipping_cost,
       recipient: form.recipient || null,
       destination: form.destination || null,
       sale_id: form.sale_id ? +form.sale_id : null,
@@ -141,7 +148,11 @@ export default function Shipments({ shipments, shipmentsError, sales, items, rel
     )
   }
 
-  const totalCost = shipments.reduce((s, x) => s + (x.shipping_cost || 0), 0)
+  // 送料合計は「入力済みの行」だけを足す。未入力(NULL)を0として足し込むと、
+  // 「送料がかかっていない」ように見えてしまうため、未入力の件数を添えて表示する。
+  const costEntered = shipments.filter((s) => s.shipping_cost != null)
+  const totalCost = costEntered.reduce((s, x) => s + (x.shipping_cost || 0), 0)
+  const costUnentered = shipments.length - costEntered.length
   const unlinked = shipments.filter((s) => !s.sale_id).length
   const withTracking = shipments.filter((s) => s.tracking_no).length
 
@@ -150,7 +161,7 @@ export default function Shipments({ shipments, shipmentsError, sales, items, rel
       <h2 className="section-title">発送サマリー</h2>
       <div className="card-grid">
         <div className="kpi-card" style={{ borderTop: '3px solid #2f4858' }}><div className="kpi-label">発送件数</div><div className="kpi-value">{shipments.length}件</div></div>
-        <div className="kpi-card" style={{ borderTop: '3px solid #2980b9' }}><div className="kpi-label">送料合計</div><div className="kpi-value">{fmt(totalCost)}</div></div>
+        <div className="kpi-card" style={{ borderTop: '3px solid #2980b9' }}><div className="kpi-label">{costUnentered > 0 ? `送料合計（未入力 ${costUnentered}件）` : '送料合計'}</div><div className="kpi-value">{fmt(totalCost)}</div></div>
         <div className="kpi-card" style={{ borderTop: '3px solid #8e44ad' }}><div className="kpi-label">追跡番号あり</div><div className="kpi-value">{withTracking}件</div></div>
         <div className="kpi-card" style={{ borderTop: '3px solid #e67e22' }}><div className="kpi-label">売上と未紐付け</div><div className="kpi-value">{unlinked}件</div></div>
       </div>
@@ -173,7 +184,9 @@ export default function Shipments({ shipments, shipmentsError, sales, items, rel
             {s.destination && <div className="item-sub">📍 {s.destination}</div>}
             <div className="price-row">
               {s.carrier && <span className="price-tag">{carrierLabel(s.carrier)}</span>}
-              <span className="price-tag">送料 {fmt(s.shipping_cost)}</span>
+              {s.shipping_cost != null
+                ? <span className="price-tag">送料 {fmt(s.shipping_cost)}</span>
+                : <span className="price-tag">送料 未入力</span>}
               {s.tracking_no
                 ? <span className="price-tag" style={{ color: '#2f4858', fontWeight: 700 }}>追跡 {s.tracking_no}</span>
                 : <span className="price-tag">追跡番号なし</span>}
@@ -206,7 +219,10 @@ export default function Shipments({ shipments, shipmentsError, sales, items, rel
           <label className="field-label">追跡番号（任意・入力すると二重登録を防げます）</label>
           <input className="field-input" value={form.tracking_no} onChange={(e) => setForm({ ...form, tracking_no: e.target.value })} placeholder="例: 123456789012" />
           <label className="field-label">送料(円)</label>
-          <input className="field-input" type="number" value={form.shipping_cost} onChange={(e) => setForm({ ...form, shipping_cost: e.target.value })} placeholder="例: 210" />
+          <input className="field-input" type="number" value={form.shipping_cost} onChange={(e) => setForm({ ...form, shipping_cost: e.target.value })} placeholder="例: 210（不明なら空欄。着払い・出品者負担なしは 0）" />
+          <div className="item-sub">
+            空欄＝未入力（あとで入れられます）／<strong>0</strong>＝当社の負担なし（着払い・送料込み）／正の数＝当社が払った額
+          </div>
           <label className="field-label">宛先（お届け先の名前）</label>
           <input className="field-input" value={form.recipient} onChange={(e) => setForm({ ...form, recipient: e.target.value })} placeholder="例: ○○様" />
           <label className="field-label">お届け先（都道府県・市区町村など）</label>
