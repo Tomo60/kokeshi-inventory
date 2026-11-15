@@ -465,15 +465,24 @@ export default function Purchases({ purchases, allPurchases, reload }) {
           />
 
           {/* 備考は長くなる（配送方法・送料・状態・経緯などを書くため）。
-              1行の入力欄だと全文が見えず、気づかないまま消してしまう恐れがあるので複数行にする。 */}
-          <label className="field-label">メモ（配送方法・送料・状態なども、ここに書いてください）</label>
+              1行の入力欄だと全文が見えず、気づかないまま消してしまう恐れがあるので複数行にする。
+
+              古物台帳には「品目」と「特徴」の記載が必要だが、専用の列がなくこの備考に書く運用のため、
+              入力時に促している。専用の列を設けるかは行政書士の確認後に判断する。 */}
+          <label className="field-label">メモ（品目・特徴は必ず。配送方法・送料・状態なども、ここに書いてください）</label>
           <textarea
             className="field-input"
             rows={6}
             value={form.note || ''}
             onChange={(e) => setForm({ ...form, note: e.target.value })}
+            placeholder={'例: こけし 3点／作家 佐藤天泉／高さ約18cm・赤い花模様／状態 やや傷や汚れあり'
+              + '／らくらくメルカリ便 宅急便60（送料¥750・出品者負担）'}
           />
           <div className="item-sub">{(form.note || '').length}文字</div>
+          <div className="item-sub">
+            古物台帳に使うため、<strong>品目</strong>（こけし・人形など）と<strong>特徴</strong>（作家名・大きさ・柄・状態）は必ず入れてください。
+            区切りは「／」で揃えると後で読みやすくなります。
+          </div>
 
           <label className="field-label">写真</label>
           <div className="photo-upload" onClick={() => document.getElementById('purchase-photo-input').click()}>📷 タップして写真を選択</div>
