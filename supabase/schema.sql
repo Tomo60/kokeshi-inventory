@@ -141,6 +141,46 @@ alter table sales add column if not exists needs_review boolean not null default
 update sales set platform = 'mercari' where platform is null;
 update sales set needs_review = true where channel_account is null and created_at < '2026-09-17';
 
+-- 利益の定義統一（経理決定 2026-11-12）。
+--   利益（net_profit）= 販売価格 − 仕入原価(cost_amount) − 手数料 − 広告費 − 送料
+-- 以前は net_profit が NULL のとき、画面側で「売値 − 商品の仕入値」を代わりに表示していた。
+-- その式は手数料・広告費・送料を無視するため、同じ「純利益」が画面によって違う意味になっていた。
+-- 原価を売上行自身に持たせ（cost_amount）、登録時に net_profit を必ず保存する方式に統一した。
+-- cost_amount が items.buy_price と別列になっているのは、売ったときに使った原価を後から
+-- 商品マスタの変更で動かさないため（申告上の原価は売却時点の値）。
+alter table sales add column if not exists cost_amount numeric; -- 仕入原価(実額)。1行ごとに必ず記録する
+
+-- cost_amount / net_profit を not null にする。
+-- NULL の行が残っている既存データベースでは制約を付けずに通知だけ出し、この schema.sql の
+-- 再実行が途中で止まらないようにしている。その場合は
+-- supabase/migrations/20261114_sales_cost_amount.sql を使って、埋め戻してから付けること。
+do $mingay_cost$
+declare
+  v_null_cost bigint;
+  v_null_net  bigint;
+begin
+  -- 紐付いた商品の仕入値が引ける行だけ埋め戻す（引けない行を0で埋めると利益が過大になる）。
+  update sales s
+     set cost_amount = i.buy_price
+    from items i
+   where i.id = s.item_id
+     and s.cost_amount is null
+     and i.buy_price is not null;
+
+  select count(*) filter (where cost_amount is null),
+         count(*) filter (where net_profit is null)
+    into v_null_cost, v_null_net
+    from sales;
+
+  if v_null_cost > 0 or v_null_net > 0 then
+    raise notice '[Mingay] sales に cost_amount が NULL の行 %件 / net_profit が NULL の行 %件 が残っているため not null は付けませんでした。supabase/migrations/20261114_sales_cost_amount.sql を参照してください。', v_null_cost, v_null_net;
+  else
+    alter table sales alter column cost_amount set not null;
+    alter table sales alter column net_profit  set not null;
+  end if;
+end
+$mingay_cost$;
+
 -- データマイグレーション: 経費「手数料」カテゴリの内部値を 'platform' から 'platform_fee' へ改名。
 -- sales テーブルの platform 列（販売チャネル区分）との名称衝突を避けるための変更で、表示ラベルは「手数料」のまま。
 -- 対象行が無ければ何も起きないため、何度実行しても安全（冪等）。
