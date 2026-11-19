@@ -91,3 +91,13 @@ body { background: #f6f3ee; }
 
 /* メモなどの複数行入力。field-input と同じ見た目で、縦だけ伸ばせるようにする。 */
 textarea.field-input { min-height: 96px; line-height: 1.5; resize: vertical; }
+
+/* ログイン画面とヘッダーのログアウトボタン。 */
+.header-spacer { flex: 1; }
+.logout-btn { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.35); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.logout-btn:disabled { opacity: 0.6; cursor: default; }
+.login-card { margin-top: 14px; }
+.login-submit { width: 100%; margin-top: 14px; padding: 10px 16px; font-size: 14px; }
+.login-submit:disabled { opacity: 0.6; cursor: default; }
+.login-error { margin-top: 12px; font-size: 13px; color: #b3261e; background: #fdecea; border-radius: 8px; padding: 8px 10px; line-height: 1.5; }
+.login-note { margin-top: 14px; line-height: 1.5; }
