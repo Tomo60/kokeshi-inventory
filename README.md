@@ -35,6 +35,21 @@ kokeshi-inventory と同じ思想（個人〜小規模事業主が一人でス�
 - 以前は「`net_profit` が NULL のときは `売値 − items.buy_price` を使う」というフォールバックがあり、**同じ「純利益」が、一方では原価を無視し、他方では手数料・広告費・送料を無視**していた。これは廃止した
 - `cost_amount` と `net_profit` は `not null`。既存のデータベースに制約を付けるには `supabase/migrations/20261114_sales_cost_amount.sql` を SQL Editor で実行する（切り戻しは同フォルダの `..._rollback.sql`）
 
+### 発送記録の送料
+
+`shipments.shipping_cost` は**「未入力」と「0円」を区別する**。
+
+| 値 | 意味 |
+|---|---|
+| NULL（空欄） | **未入力**。送料がいくらだったか分からない（着払いで額が不明な場合もここ） |
+| `0` | **当社の負担なし**。着払いで受取人が払った、送料込みで出品者が払った |
+| 正の数 | 当社が払った額 |
+
+- 入力欄を空欄のまま保存すると NULL になる。`0` は明示的に入力したときだけ入る
+- 一覧では NULL を「送料 未入力」と表示する。送料合計は**入力済みの行だけを足し**、未入力が何件あるかを添える（未入力を0として足すと「送料がかかっていない」ように見えるため）
+- 損益計算に使うのは `sales.shipping_fee` で、`shipments.shipping_cost` は物流記録。詳細は「経費の費目」の `shipping` を参照
+- 既存のデータベースに適用するには `supabase/migrations/20261115_shipping_cost_nullable.sql` を SQL Editor で実行する（切り戻しは同フォルダの `..._rollback.sql`）。**既存の行の値は書き換えない**ので、以前「空欄→0」で保存された行は 0 のまま残る。それを未入力に直すかは行ごとの判断が必要
+
 - **仕入帳**: 仕入先・仕入記録の管理、仕入れから在庫への追加
 - **経費帳**: カテゴリ別経費、領収書写真、支払先・支払方法の記録、定期経費テンプレート（家賃などの毎月固定費を登録しておくと、計上日を過ぎた当月分をアプリ起動時に自動計上）
 
@@ -56,7 +71,7 @@ kokeshi-inventory と同じ思想（個人〜小規模事業主が一人でス�
 | `move_in` | 入居費用 | 入居時に**一回限り**かかる費用（ハウスクリーニング・鍵交換・仲介手数料など）。毎月の家賃と分けて集計したいので別費目にしている |
 | `utilities` | 水道光熱費 | 水道代・ガス代・電気代など。家賃と同じ物件にかかるが毎月額が変わるので、定額の `rent` とは分けて集計する |
 | `materials` | 梱包材料費 | 段ボール・緩衝材など。商品そのものの仕入は `purchases` 側 |
-| `shipping` | 送料 | |
+| `shipping` | 送料 | 特定の売上に紐づかない送料関連費用（切手の一括購入など）に限定。**個別の売上に紐づく発送の送料は `sales.shipping_fee` に記録し、ここには入れない**（二重計上になる）。物流記録側の `shipments.shipping_cost` は損益計算に使わない |
 | `platform_fee` | 手数料 | 販売手数料など。`sales` の `platform` 列（販路区分）とは別物 |
 | `equipment` | 備品 | |
 | `other` | その他 | |
@@ -116,6 +131,7 @@ npm update @holiday-jp/holiday_jp
    - 既存プロジェクトに売上の多販路・複数アカウント対応を追加する場合は、`supabase/schema.sql` の `alter table sales add column if not exists ...` 9行と、その直後の初期化用 `update` 2行を SQL Editor で実行してください
    - 既存プロジェクトに仕入れの後追い集計対応を追加する場合は、`supabase/schema.sql` の `alter table purchases add column if not exists ...` 6行と、その直後の `create unique index if not exists ...` 2つを SQL Editor で実行してください
    - 既存プロジェクトに売上の仕入原価（利益の定義統一）を追加する場合は、`supabase/migrations/20261114_sales_cost_amount.sql` を SQL Editor で実行してください。`cost_amount` 列を足し、`cost_amount` と `net_profit` を `not null` にします。原価が埋め戻せない売上行が残っていると、制約を付ける前に該当idを示して中断します（0で埋めて利益を過大にしないため）。**コードのデプロイ後に実行**してください（`net_profit` を必ず保存する新しい販売フォームが本番に出ている状態が前提です）
+   - 既存プロジェクトで送料の「未入力」と「0円」を区別できるようにする場合は、`supabase/migrations/20261115_shipping_cost_nullable.sql` を SQL Editor で実行してください。`shipments.shipping_cost` の `not null` と既定値 `0` を外します。**既存の行の値は書き換えません**（切り戻しは同フォルダの `..._rollback.sql`。NULL の行が残っていると件数とidを示して中断します）
    - テーブルを追加したのにアプリから常に0件に見える・保存できない場合はRLSを確認してください。ダッシュボードの Table Editor からテーブルを作るとRLSが既定で有効になり、ポリシーが無いと anon key からは全件拒否になります。確認・修正のSQLは `supabase/schema.sql` 末尾のコメントにあります
 2. Storage に `mingay-photos` という名前の公開バケットを作成する
 3. `.env.example` を `.env` にコピーし、Supabaseの URL と anon key を設定する

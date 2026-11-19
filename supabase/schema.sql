@@ -211,7 +211,7 @@ create unique index if not exists sales_platform_order_no_uniq
 -- 1つの売上に対して分割発送・再送が起こりうるので、売上1:発送多の構造にしている
 -- （sales 側に列を足す形にすると1売上1発送しか持てない）。
 -- on delete set null にしているのは、売上を消しても「発送した事実」と伝票の写真は残すため。
--- shipping_cost を not null default 0 にしているのは既存の金額系と揃えるためで、合計の算出でNULLが伝播するのを防ぐ。
+-- shipping_cost の意味づけは下の列定義のコメントを参照（NULL を許すので、合計は入力済みの行だけを足す）。
 create table if not exists shipments (
   id bigint generated always as identity primary key,
   sale_id bigint references sales(id) on delete set null,
@@ -219,7 +219,9 @@ create table if not exists shipments (
   carrier text, -- 'yamato' | 'japanpost' | 'sagawa' | 'other'
   method text, -- 'rakuraku' | 'nekoposu' | 'compact' | 'takkyubin' | 'yuyu' | 'yupacket' | 'yupacket_post' | 'yupack' | 'other'
   tracking_no text, -- 追跡番号。API連携が無いため任意入力
-  shipping_cost numeric not null default 0, -- 送料（実額）
+  -- 送料（実額）。NULL=未入力 / 0=当社の負担なし（着払い・送料込み）/ 正の数=当社が払った額。
+  -- 以前は not null default 0 だったため「0円だったのか入れ忘れたのか」が区別できなかった。
+  shipping_cost numeric,
   recipient text, -- お届け先の名前
   destination text, -- お届け先（都道府県・市区町村など）
   note text,
@@ -234,6 +236,14 @@ create table if not exists shipments (
 -- 二重登録の主な原因になるため、業者を含めると弾けなくなるのを避けている。
 create unique index if not exists shipments_tracking_no_uniq
   on shipments (tracking_no) where tracking_no is not null;
+
+-- 既存のデータベース向け: shipping_cost の not null と既定値0を外す。
+-- 上の create table は新規作成時しか効かないため、ここで既存installにも同じ状態を作る。
+-- 既存の行の値は書き換えない（0 のまま残る）。何度実行しても同じ状態になる（冪等）。
+-- 「0 として入っている既存の行を、未入力(NULL)に直すかどうか」は行ごとの判断が必要なので、
+-- このファイルでは触らない（supabase/migrations/20261115_shipping_cost_nullable.sql のコメント参照）。
+alter table shipments alter column shipping_cost drop not null;
+alter table shipments alter column shipping_cost drop default;
 
 -- 事業情報（古物商許可の記録）。
 -- 古物営業法で定められた「許可証の番号・交付年月日・公安委員会」を帳簿側からも参照できるようにする。
