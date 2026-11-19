@@ -19,6 +19,22 @@ kokeshi-inventory と同じ思想（個人〜小規模事業主が一人でス�
 - 返品・キャンセルのステータスを付けた売上は、売上・利益・顧客の購入実績の集計から除外される
 - 過去分でアカウントが特定できない行は `needs_review`（要確認）フラグで管理し、無理に全件特定しない
 
+#### 利益の定義
+
+```
+純利益(net_profit) = 販売価格 − 仕入原価(cost_amount) − 手数料 − 広告費 − 送料
+```
+
+これが唯一の正式な「利益」で、登録時に必ず `sales.net_profit` へ保存する。
+
+- **原価は売上1行ごとに必須入力**。商品を選ぶと `items.buy_price` が初期値に入る。商品を選ばない単発販売や、商品に仕入値が登録されていない場合は手で入力する
+- **空欄と0を区別する**。空欄のままでは保存できない（保存前に止める）。無償で入手したものは `0` を明示的に入力する。原価の未入力を黙って0として計上すると利益が過大になるため
+- 原価を `items.buy_price` の参照ではなく `sales.cost_amount` として売上行に持たせているのは、売ったときに使った原価を後から商品マスタの変更で動かさないため（申告上の原価は売却時点の値）
+- まとめ買いの原価配分は仕入の平均単価（`purchases.avg_amount`）をデフォルトとし、単価が大きく異なる商品が混在する場合は個別に上書きする。根拠はメモに残す
+- 粗利（売値−原価のみ）や手取り（諸経費のみ差引）は別列として保存しない。必要なら画面で都度計算して表示する
+- 以前は「`net_profit` が NULL のときは `売値 − items.buy_price` を使う」というフォールバックがあり、**同じ「純利益」が、一方では原価を無視し、他方では手数料・広告費・送料を無視**していた。これは廃止した
+- `cost_amount` と `net_profit` は `not null`。既存のデータベースに制約を付けるには `supabase/migrations/20261114_sales_cost_amount.sql` を SQL Editor で実行する（切り戻しは同フォルダの `..._rollback.sql`）
+
 ### 発送記録の送料
 
 `shipments.shipping_cost` は**「未入力」と「0円」を区別する**。
@@ -114,6 +130,7 @@ npm update @holiday-jp/holiday_jp
    - 既存プロジェクトに定期経費機能を追加する場合は、`supabase/schema.sql` の `create table if not exists recurring_expenses (...)` と、その直後の `alter table expenses add column if not exists ...` 3行を SQL Editor で実行してください
    - 既存プロジェクトに売上の多販路・複数アカウント対応を追加する場合は、`supabase/schema.sql` の `alter table sales add column if not exists ...` 9行と、その直後の初期化用 `update` 2行を SQL Editor で実行してください
    - 既存プロジェクトに仕入れの後追い集計対応を追加する場合は、`supabase/schema.sql` の `alter table purchases add column if not exists ...` 6行と、その直後の `create unique index if not exists ...` 2つを SQL Editor で実行してください
+   - 既存プロジェクトに売上の仕入原価（利益の定義統一）を追加する場合は、`supabase/migrations/20261114_sales_cost_amount.sql` を SQL Editor で実行してください。`cost_amount` 列を足し、`cost_amount` と `net_profit` を `not null` にします。原価が埋め戻せない売上行が残っていると、制約を付ける前に該当idを示して中断します（0で埋めて利益を過大にしないため）。**コードのデプロイ後に実行**してください（`net_profit` を必ず保存する新しい販売フォームが本番に出ている状態が前提です）
    - 既存プロジェクトで送料の「未入力」と「0円」を区別できるようにする場合は、`supabase/migrations/20261115_shipping_cost_nullable.sql` を SQL Editor で実行してください。`shipments.shipping_cost` の `not null` と既定値 `0` を外します。**既存の行の値は書き換えません**（切り戻しは同フォルダの `..._rollback.sql`。NULL の行が残っていると件数とidを示して中断します）
    - テーブルを追加したのにアプリから常に0件に見える・保存できない場合はRLSを確認してください。ダッシュボードの Table Editor からテーブルを作るとRLSが既定で有効になり、ポリシーが無いと anon key からは全件拒否になります。確認・修正のSQLは `supabase/schema.sql` 末尾のコメントにあります
 2. Storage に `mingay-photos` という名前の公開バケットを作成する
